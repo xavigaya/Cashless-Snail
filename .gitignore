@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# Expo
+apps/tpv/.expo/
+apps/tpv/android/
+apps/tpv/ios/
+apps/tpv/web-build/

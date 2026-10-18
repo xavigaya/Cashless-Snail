@@ -1,0 +1,16 @@
+# Base de dades per a desenvolupament local.
+# Arrenca-la amb: docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cashless
+      POSTGRES_PASSWORD: cashless
+      POSTGRES_DB: cashless
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

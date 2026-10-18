@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Cashless TPV",
+    "slug": "cashless-tpv",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "cat.cashlesssnail.tpv",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NFCReaderUsageDescription": "Per llegir les polseres de pagament"
+      }
+    },
+    "android": {
+      "package": "cat.cashlesssnail.tpv",
+      "permissions": ["android.permission.NFC", "android.permission.CAMERA"]
+    },
+    "plugins": [
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "Per llegir les polseres de pagament",
+          "includeNdefEntitlement": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Per escanejar el QR de les polseres i de vinculació del terminal",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}
