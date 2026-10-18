@@ -12,7 +12,7 @@ import {
   type Organization,
 } from '@cashless/shared';
 import { hashSecret } from '../common/crypto';
-import { notFound, ZodPipe } from '../common/errors';
+import { conflict, notFound, ZodPipe } from '../common/errors';
 import { DB, type Db, type Queryable } from '../db/db';
 import { adminUsers, events, organizations, roleAssignments } from '../db/schema';
 import { AdminGuard } from '../auth/guards';
@@ -28,11 +28,16 @@ import { AdminAccessService } from './admin-access.service';
 import { toEvent, toOrganization } from './mappers';
 
 /**
- * Crea un usuari del backoffice (o reutilitza el que ja tingui aquest correu) i li assigna un rol.
- * Si l'usuari ja existeix, no se li canvia la contrasenya.
+ * Crea un usuari del backoffice i li assigna un rol.
+ *
+ * Seguretat: si el correu ja existeix, només un administrador de plataforma hi pot afegir rols.
+ * Altrament, l'administrador d'una entitat podria crear el compte d'una persona d'una altra entitat
+ * amb una contrasenya que ell coneix i, més endavant, entrar-hi amb els permisos que li donessin.
+ * (Fase 2: substituir per invitació per correu perquè cada persona triï la seva contrasenya.)
  */
 export async function grantAdminRole(
   db: Queryable,
+  grantor: AdminPrincipal,
   input: CreateAdminUserInput,
   role: AdminRole,
   scope: { organizationId?: string; eventId?: string },
@@ -42,6 +47,9 @@ export async function grantAdminRole(
     .from(adminUsers)
     .where(eq(sql`lower(${adminUsers.email})`, input.email.toLowerCase()))
     .limit(1);
+  if (existing && !isPlatformAdmin(grantor)) {
+    throw conflict('CONFLICT', 'Ja existeix un usuari amb aquest correu. Demana a l’administrador de plataforma que li assigni el rol.');
+  }
   const user =
     existing ??
     (
@@ -116,7 +124,7 @@ export class OrganizationsController {
     @Body(new ZodPipe(createAdminUserSchema)) body: CreateAdminUserInput,
   ): Promise<{ id: string; email: string; name: string }> {
     assertCanManageOrganization(admin, orgId);
-    const user = await grantAdminRole(this.db, body, 'org_admin', { organizationId: orgId });
+    const user = await grantAdminRole(this.db, admin, body, 'org_admin', { organizationId: orgId });
     await this.access.audit(this.db, admin, { action: 'organization.add_admin', targetType: 'admin_user', targetId: user.id });
     return user;
   }

@@ -157,6 +157,8 @@ export const wallets = pgTable('wallets', {
   paidCents: integer('paid_cents').notNull().default(0),
   promoCents: integer('promo_cents').notNull().default(0),
   depositCents: integer('deposit_cents').notNull().default(0),
+  /** Bloqueig propi d'aquesta entitat (migració 0002). */
+  status: text('status').$type<WristbandStatus>().notNull().default('active'),
   createdAt: createdAt(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 });

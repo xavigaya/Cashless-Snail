@@ -13,7 +13,8 @@ describe('Cashless · fase 0', () => {
   let admin: Client;
   let eventId: string;
   let orgId: string;
-  const ids: Record<string, string> = {};
+  type Key = 'colla' | 'ampa' | 'bar' | 'box' | 'beer' | 'water' | 'sandwich' | 'cashier' | 'barLead' | 'boxOffice';
+  const ids = {} as Record<Key, string>;
   let barTerminal: Client; // terminal de barra, sense operador
   let boxTerminal: Client; // terminal de taquilla, sense operador
   let cashier: Client;
@@ -229,6 +230,19 @@ describe('Cashless · fase 0', () => {
       const balance = await cashier.get(`/tpv/balance?uid=${UID}`).expect(200);
       expect(balance.body.paidCents).toBe(700);
     });
+
+    it('un duplicat simultani amb el saldo just retorna el resultat original, no “saldo insuficient”', async () => {
+      // Saldo: 700. Una venda de 600 enviada cinc vegades alhora: només es cobra una vegada
+      // i totes les respostes són d'èxit (si no, el terminal creuria que no s'ha cobrat).
+      const id = newId();
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () => cashier.post('/tpv/sales', { id, wristband, lines: [{ productId: ids.beer, quantity: 2 }] })),
+      );
+      expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
+      expect(results.filter((r) => r.body.replayed === false)).toHaveLength(1);
+      const balance = await cashier.get(`/tpv/balance?uid=${UID}`).expect(200);
+      expect(balance.body.paidCents).toBe(100);
+    });
   });
 
   describe('backoffice', () => {
@@ -251,16 +265,16 @@ describe('Cashless · fase 0', () => {
     it('el resum quadra amb el llibre de moviments', async () => {
       const res = await admin.get(`/events/${eventId}/summary`).expect(200);
       const totals = res.body as EventTotals;
-      // Recàrregues: 1000 + 900. Vendes vàlides: 3 × 300 + 1 × 300 (2 aigües). Anul·lades: 750.
+      // Recàrregues: 1000 + 900. Vendes vàlides: 3 × 300 + 300 (2 aigües) + 600 (2 cerveses). Anul·lades: 750.
       expect(totals.topupsCents).toBe(1900);
       expect(totals.topupsByMethod.cash).toBe(1900);
-      expect(totals.salesCents).toBe(1200);
-      expect(totals.salesCount).toBe(4);
+      expect(totals.salesCents).toBe(1800);
+      expect(totals.salesCount).toBe(5);
       expect(totals.voidsCents).toBe(750);
       expect(totals.wristbandFeesCents).toBe(200);
-      expect(totals.paidBalanceOutstandingCents).toBe(700);
+      expect(totals.paidBalanceOutstandingCents).toBe(100);
       expect(totals.activeWristbands).toBe(2);
-      expect(totals.salesByVendor).toEqual([{ vendorId: ids.colla, vendorName: 'Colla Castellera', salesCents: 1200, count: 4 }]);
+      expect(totals.salesByVendor).toEqual([{ vendorId: ids.colla, vendorName: 'Colla Castellera', salesCents: 1800, count: 5 }]);
 
       const movements = await admin.get(`/events/${eventId}/movements?limit=5`).expect(200);
       expect(movements.body.items).toHaveLength(5);

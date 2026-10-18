@@ -4,17 +4,25 @@ import type { Balance, Movement, Page } from '@cashless/shared';
 import type { Queryable } from '../db/db';
 import { movementLines, movements, operators, wallets, wristbands, type WalletRow, type WristbandRow } from '../db/schema';
 
-export function toBalance(wristband: WristbandRow, wallet: Pick<WalletRow, 'paidCents' | 'promoCents' | 'depositCents'> | null): Balance {
+/**
+ * L'estat que veu una entitat combina el de la polsera (global, p. ex. perduda)
+ * i el del seu saldo (bloqueig propi de l'entitat).
+ */
+export function toBalance(
+  wristband: WristbandRow,
+  wallet: Pick<WalletRow, 'paidCents' | 'promoCents' | 'depositCents' | 'status'> | null,
+): Balance {
   const paidCents = wallet?.paidCents ?? 0;
   const promoCents = wallet?.promoCents ?? 0;
+  const status = wristband.status !== 'active' ? wristband.status : (wallet?.status ?? 'active');
   return {
     wristbandId: wristband.id,
     code: wristband.code,
-    status: wristband.status,
+    status,
     paidCents,
     promoCents,
     depositCents: wallet?.depositCents ?? 0,
-    availableCents: wristband.status === 'active' ? paidCents + promoCents : 0,
+    availableCents: status === 'active' ? paidCents + promoCents : 0,
   };
 }
 
@@ -98,7 +106,8 @@ function encodeCursor(createdAt: Date, id: string): string {
 function decodeCursor(cursor: string): { createdAt: Date; id: string } | null {
   const [iso, id] = Buffer.from(cursor, 'base64url').toString().split('|');
   const createdAt = new Date(iso ?? '');
-  return id && !Number.isNaN(createdAt.getTime()) ? { createdAt, id } : null;
+  const validId = id !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return validId && !Number.isNaN(createdAt.getTime()) ? { createdAt, id } : null;
 }
 
 export async function listMovements(

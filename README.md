@@ -97,7 +97,13 @@ Fase 0 — prototip:
 | App TPV (venda, taquilla, NFC, QR) | Escrita, pendent de provar en dispositius reals |
 
 El codi es va escriure en un entorn sense accés al registre de npm, per això encara no s’ha pogut instal·lar ni executar.
+Ha passat una revisió independent del servidor (concurrència, idempotència, permisos) i se n’han corregit les incidències.
 El següent pas és `pnpm install`, `pnpm typecheck` i `pnpm test`, i corregir el que surti.
+
+Qüestions obertes:
+
+- Ara una polsera registrada es pot recarregar en qualsevol entitat sense haver pagat el preu de la polsera en aquell esdeveniment. Cal decidir si la recàrrega ha d’exigir l’activació prèvia.
+- Els administradors es creen amb una contrasenya inicial que tria qui els dona d’alta. A la fase 2 caldrà substituir-ho per una invitació per correu.
 
 Fases següents (vegeu el document d’especificacions): esdeveniment real (multi-venedor complet, cuina amb impressora, funcionament offline, informes PDF i Excel), servei a entitats (recàrrega online, devolucions, promocions, estoc) i escala (node local, analítica, Verifactu).
 

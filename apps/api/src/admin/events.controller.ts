@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -21,13 +21,13 @@ import {
   type WristbandRef,
   type WristbandStatusInput,
 } from '@cashless/shared';
-import { notFound, ZodPipe } from '../common/errors';
+import { DomainError, notFound, ZodPipe } from '../common/errors';
 import { DB, type Db } from '../db/db';
 import { events, movements, wallets, wristbands } from '../db/schema';
 import { AdminGuard } from '../auth/guards';
 import { assertCanManageOrganization, CurrentAdmin, type AdminPrincipal } from '../auth/principals';
 import { LedgerService } from '../ledger/ledger.service';
-import { listMovements } from '../ledger/views';
+import { listMovements, toBalance } from '../ledger/views';
 import { AdminAccessService } from './admin-access.service';
 import { toEvent } from './mappers';
 import { grantAdminRole } from './organizations.controller';
@@ -71,6 +71,11 @@ export class EventsController {
     @Body(new ZodPipe(updateEventSchema)) body: UpdateEventInput,
   ): Promise<EventSummary> {
     const event = await this.access.event(admin, eventId);
+    const startsAt = body.startsAt ?? event.startsAt;
+    const endsAt = body.endsAt ?? event.endsAt;
+    if (endsAt <= startsAt) {
+      throw new DomainError('VALIDATION_ERROR', 'La data de final ha de ser posterior a la d’inici', HttpStatus.BAD_REQUEST);
+    }
     const [row] = await this.db
       .update(events)
       .set({ ...body, updatedAt: new Date() })
@@ -89,7 +94,7 @@ export class EventsController {
   ): Promise<{ id: string; email: string; name: string }> {
     const event = await this.access.event(admin, eventId);
     assertCanManageOrganization(admin, event.organizationId);
-    const user = await grantAdminRole(this.db, body, 'event_manager', { eventId });
+    const user = await grantAdminRole(this.db, admin, body, 'event_manager', { eventId });
     await this.access.audit(this.db, admin, { eventId, action: 'event.add_manager', targetType: 'admin_user', targetId: user.id });
     return user;
   }
@@ -139,6 +144,10 @@ export class EventsController {
     return { balance, movements: page.items };
   }
 
+  /**
+   * Bloqueja o desbloqueja la polsera per a l'entitat de l'esdeveniment.
+   * No afecta el saldo que la polsera pugui tenir en altres entitats.
+   */
   @Patch('wristbands/:wristbandId/status')
   async setWristbandStatus(
     @CurrentAdmin() admin: AdminPrincipal,
@@ -147,24 +156,15 @@ export class EventsController {
     @Body(new ZodPipe(wristbandStatusSchema)) body: WristbandStatusInput,
   ): Promise<Balance> {
     const event = await this.access.event(admin, eventId);
-    // Només es pot bloquejar una polsera que tingui saldo a l'entitat de l'esdeveniment.
     const [wallet] = await this.db
-      .select()
-      .from(wallets)
+      .update(wallets)
+      .set({ status: body.status, updatedAt: new Date() })
       .where(and(eq(wallets.wristbandId, wristbandId), eq(wallets.organizationId, event.organizationId)))
-      .limit(1);
+      .returning();
     if (!wallet) throw notFound('Polsera');
-    const [wristband] = await this.db.update(wristbands).set({ status: body.status }).where(eq(wristbands.id, wristbandId)).returning();
+    const [wristband] = await this.db.select().from(wristbands).where(eq(wristbands.id, wristbandId)).limit(1);
     await this.access.audit(this.db, admin, { eventId, action: 'wristband.status', targetType: 'wristband', targetId: wristbandId, data: body });
-    return {
-      wristbandId,
-      code: wristband!.code,
-      status: wristband!.status,
-      paidCents: wallet.paidCents,
-      promoCents: wallet.promoCents,
-      depositCents: wallet.depositCents,
-      availableCents: wristband!.status === 'active' ? wallet.paidCents + wallet.promoCents : 0,
-    };
+    return toBalance(wristband!, wallet);
   }
 
   /** Xifres principals de l'esdeveniment, netes d'anul·lacions. */

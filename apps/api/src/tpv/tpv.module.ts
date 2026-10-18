@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, Module, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { and, asc, eq, gt } from 'drizzle-orm';
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import {
   activationSchema,
   operatorLoginSchema,
@@ -28,7 +28,7 @@ import {
 import { randomToken, sha256, verifySecret } from '../common/crypto';
 import { DomainError, forbidden, notFound, ZodPipe } from '../common/errors';
 import { DB, type Db } from '../db/db';
-import { events, movements, operators, pointsOfSale, products, terminals, type EventRow } from '../db/schema';
+import { events, movements, operators, pointsOfSale, products, terminals } from '../db/schema';
 import { assertOperatorRole, OperatorGuard, TerminalGuard, type OperatorTokenPayload } from '../auth/guards';
 import {
   BOX_OFFICE_ROLES,
@@ -57,16 +57,10 @@ export class TpvService {
   ) {}
 
   async pair(input: PairTerminalInput): Promise<PairResult> {
-    const [terminal] = await this.db
-      .select()
-      .from(terminals)
-      .where(and(eq(terminals.pairingCode, input.pairingCode), gt(terminals.pairingExpiresAt, new Date()), eq(terminals.active, true)))
-      .limit(1);
-    if (!terminal) {
-      throw new DomainError('INVALID_PAIRING_CODE', 'Codi de vinculació incorrecte o caducat', HttpStatus.UNAUTHORIZED);
-    }
     const token = randomToken();
-    await this.db
+    // Una sola actualització condicional: si dos dispositius fan servir el mateix codi alhora,
+    // només un el consumeix i l'altre rep un error (no queda cap dispositiu amb un token invàlid).
+    const [terminal] = await this.db
       .update(terminals)
       .set({
         tokenHash: sha256(token),
@@ -76,7 +70,11 @@ export class TpvService {
         lastSeenAt: new Date(),
         deviceName: input.deviceName,
       })
-      .where(eq(terminals.id, terminal.id));
+      .where(and(eq(terminals.pairingCode, input.pairingCode), gt(terminals.pairingExpiresAt, new Date()), eq(terminals.active, true)))
+      .returning({ id: terminals.id });
+    if (!terminal) {
+      throw new DomainError('INVALID_PAIRING_CODE', 'Codi de vinculació incorrecte o caducat', HttpStatus.UNAUTHORIZED);
+    }
     return { terminalToken: token, context: await this.context(terminal.id) };
   }
 
@@ -122,23 +120,29 @@ export class TpvService {
     if (operator.lockedUntil && operator.lockedUntil > new Date()) {
       throw new DomainError('OPERATOR_LOCKED', 'Massa intents fallits: espera uns minuts', HttpStatus.TOO_MANY_REQUESTS);
     }
-    const allowed = terminal.posKind === 'box_office' ? BOX_OFFICE_ROLES : SALE_ROLES;
-    assertOperatorRole(operator.role, allowed);
 
     if (!(await verifySecret(input.pin, operator.pinHash))) {
-      const attempts = operator.failedAttempts + 1;
-      await this.db
+      // Increment atòmic: diverses peticions en paral·lel no poden saltar-se el límit d'intents.
+      const [counted] = await this.db
         .update(operators)
-        .set({
-          failedAttempts: attempts >= MAX_PIN_ATTEMPTS ? 0 : attempts,
-          lockedUntil: attempts >= MAX_PIN_ATTEMPTS ? new Date(Date.now() + PIN_LOCK_MINUTES * 60_000) : null,
-        })
-        .where(eq(operators.id, operator.id));
+        .set({ failedAttempts: sql`${operators.failedAttempts} + 1` })
+        .where(eq(operators.id, operator.id))
+        .returning({ failedAttempts: operators.failedAttempts });
+      if ((counted?.failedAttempts ?? 0) >= MAX_PIN_ATTEMPTS) {
+        await this.db
+          .update(operators)
+          .set({ failedAttempts: 0, lockedUntil: new Date(Date.now() + PIN_LOCK_MINUTES * 60_000) })
+          .where(eq(operators.id, operator.id));
+      }
       throw new DomainError('INVALID_PIN', 'PIN incorrecte', HttpStatus.UNAUTHORIZED);
     }
     if (operator.failedAttempts > 0 || operator.lockedUntil) {
       await this.db.update(operators).set({ failedAttempts: 0, lockedUntil: null }).where(eq(operators.id, operator.id));
     }
+
+    // El rol es comprova després del PIN, perquè sense PIN no es pugui saber el rol de ningú.
+    const allowed = terminal.posKind === 'box_office' ? BOX_OFFICE_ROLES : SALE_ROLES;
+    assertOperatorRole(operator.role, allowed);
 
     const payload: OperatorTokenPayload = { sub: operator.id, kind: 'operator', terminalId: terminal.id, eventId: terminal.eventId };
     const token = await this.jwt.signAsync(payload, { expiresIn: `${OPERATOR_SESSION_HOURS}h` });
@@ -161,8 +165,9 @@ export class TpvService {
 
   async operationContext(terminal: TerminalPrincipal, operator: OperatorPrincipal): Promise<OperationContext> {
     const [event] = await this.db.select().from(events).where(eq(events.id, terminal.eventId)).limit(1);
+    if (!event) throw notFound('Esdeveniment');
     return {
-      event: event as EventRow,
+      event,
       pointOfSaleId: terminal.pointOfSaleId,
       vendorId: terminal.vendorId,
       terminalId: terminal.id,

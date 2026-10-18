@@ -8,7 +8,7 @@ import {
   type PipeTransform,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ZodSchema } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import type { ApiError, ErrorCode } from '@cashless/shared';
 import { isUniqueViolation } from '../db/db';
 
@@ -36,7 +36,8 @@ export const conflict = (code: ErrorCode, message: string, details?: unknown) =>
 
 /** Valida el cos o la consulta d'una petició amb un esquema de zod. */
 export class ZodPipe<T> implements PipeTransform<unknown, T> {
-  constructor(private readonly schema: ZodSchema<T>) {}
+  // T és el tipus de sortida (amb els valors per defecte aplicats), no el d'entrada.
+  constructor(private readonly schema: ZodType<T, ZodTypeDef, unknown>) {}
 
   transform(value: unknown): T {
     const result = this.schema.safeParse(value);

@@ -17,6 +17,8 @@ const slug = z
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'Només minúscules, xifres i guions');
 const vatRateBps = z.number().int().min(0).max(10000);
 const commissionBps = z.number().int().min(0).max(10000);
+/** Data ISO 8601 amb zona horària. (z.coerce.date() sol acceptaria null com a 1970-01-01.) */
+const isoDate = z.string().datetime({ offset: true }).pipe(z.coerce.date());
 
 // ---------- Autenticació ----------
 
@@ -47,8 +49,8 @@ export type CreateAdminUserInput = z.infer<typeof createAdminUserSchema>;
 const eventBase = z.object({
   name: z.string().min(2).max(120),
   slug,
-  startsAt: z.coerce.date(),
-  endsAt: z.coerce.date(),
+  startsAt: isoDate,
+  endsAt: isoDate,
   wristbandPriceCents: cents.default(0),
   wristbandDepositCents: cents.default(0),
   maxBalanceCents: positiveCents.default(50000),
@@ -185,7 +187,7 @@ export const saleSchema = z.object({
     .array(z.object({ productId: uuid, quantity: z.number().int().min(1).max(99) }))
     .min(1)
     .max(50),
-  clientCreatedAt: z.coerce.date().optional(),
+  clientCreatedAt: isoDate.optional(),
 });
 export type SaleInput = z.infer<typeof saleSchema>;
 
@@ -194,7 +196,7 @@ export const topupSchema = z.object({
   wristband: wristbandRefSchema,
   amountCents: positiveCents.max(100000),
   method: z.enum(['cash', 'card']),
-  clientCreatedAt: z.coerce.date().optional(),
+  clientCreatedAt: isoDate.optional(),
 });
 export type TopupInput = z.infer<typeof topupSchema>;
 
@@ -202,7 +204,7 @@ export const activationSchema = z.object({
   id: uuid,
   wristband: wristbandRefSchema,
   method: z.enum(['cash', 'card']).default('cash'),
-  clientCreatedAt: z.coerce.date().optional(),
+  clientCreatedAt: isoDate.optional(),
 });
 export type ActivationInput = z.infer<typeof activationSchema>;
 

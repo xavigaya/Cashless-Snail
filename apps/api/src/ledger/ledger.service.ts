@@ -133,6 +133,7 @@ export class LedgerService {
       );
 
       const wallet = await this.lockWallet(tx, wristband.id, ctx.event.organizationId, false);
+      this.assertWalletActive(wallet);
       const split = splitDebit(priced.totalCents, wallet?.promoCents ?? 0, wallet?.paidCents ?? 0);
       if (!wallet || !split) {
         throw unprocessable('INSUFFICIENT_BALANCE', 'Saldo insuficient', {
@@ -175,6 +176,7 @@ export class LedgerService {
       this.assertEventActive(ctx.event);
       const wristband = await this.requireActiveWristband(tx, input.wristband);
       const wallet = (await this.lockWallet(tx, wristband.id, ctx.event.organizationId, true))!;
+      this.assertWalletActive(wallet);
 
       const resulting = wallet.paidCents + wallet.promoCents + input.amountCents;
       if (resulting > ctx.event.maxBalanceCents) {
@@ -221,6 +223,7 @@ export class LedgerService {
         throw unprocessable('WRISTBAND_BLOCKED', 'Aquesta polsera està bloquejada');
       }
       let wallet = (await this.lockWallet(tx, wristband.id, ctx.event.organizationId, true))!;
+      this.assertWalletActive(wallet);
 
       const [already] = await tx
         .select({ id: movements.id })
@@ -329,6 +332,9 @@ export class LedgerService {
   ): Promise<T> {
     const attempt = () =>
       this.db.transaction(async (tx) => {
+        // Serialitza les peticions amb el mateix identificador: un duplicat que arriba mentre
+        // l'original encara s'està processant espera i després en retorna el resultat.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${id}, 0))`);
         const [existing] = await tx
           .select({ requestHash: movements.requestHash })
           .from(movements)
@@ -346,12 +352,29 @@ export class LedgerService {
     try {
       return await attempt();
     } catch (error) {
-      // Dues peticions iguals alhora: la segona troba el moviment ja creat i en retorna el resultat.
-      if (isUniqueViolation(error, 'movements_pkey')) return attempt();
-      if (isUniqueViolation(error, 'movements_reverses_movement_id_key')) {
-        throw conflict('ALREADY_VOIDED', 'Aquest moviment ja està anul·lat');
+      // Xarxa de seguretat: si tot i el bloqueig el moviment ja existia, el reintent en retorna el resultat.
+      if (isUniqueViolation(error, 'movements_pkey')) {
+        try {
+          return await attempt();
+        } catch (retryError) {
+          throw this.mapUniqueViolation(retryError);
+        }
       }
-      throw error;
+      throw this.mapUniqueViolation(error);
+    }
+  }
+
+  private mapUniqueViolation(error: unknown): unknown {
+    if (isUniqueViolation(error, 'movements_reverses_movement_id_key')) {
+      return conflict('ALREADY_VOIDED', 'Aquest moviment ja està anul·lat');
+    }
+    return error;
+  }
+
+  /** El saldo d'una polsera es pot bloquejar per a una entitat sense afectar-ne les altres. */
+  private assertWalletActive(wallet: WalletRow | null): void {
+    if (wallet && wallet.status !== 'active') {
+      throw unprocessable('WRISTBAND_BLOCKED', 'Aquesta polsera està bloquejada per a aquesta entitat');
     }
   }
 
