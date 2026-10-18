@@ -37,7 +37,7 @@ import {
   type WalletRow,
   type WristbandRow,
 } from '../db/schema';
-import { loadBalance, loadMovement, loadMovements, toBalance } from './views';
+import { isActivatedInEvent, loadBalance, loadMovement, loadMovements, toBalance } from './views';
 
 /** Qui fa l'operació i on. */
 export interface OperationContext {
@@ -86,10 +86,10 @@ export class LedgerService {
     return row ?? null;
   }
 
-  async balance(organizationId: string, ref: WristbandRef): Promise<Balance> {
+  async balance(event: { id: string; organizationId: string }, ref: WristbandRef): Promise<Balance> {
     const wristband = await this.findWristband(this.db, ref);
     if (!wristband) throw new DomainError('WRISTBAND_NOT_FOUND', 'Polsera no registrada', HttpStatus.NOT_FOUND);
-    return loadBalance(this.db, wristband, organizationId);
+    return loadBalance(this.db, wristband, event);
   }
 
   // ---------------------------------------------------------------
@@ -134,6 +134,7 @@ export class LedgerService {
 
       const wallet = await this.lockWallet(tx, wristband.id, ctx.event.organizationId, false);
       this.assertWalletActive(wallet);
+      await this.assertActivated(tx, wallet, ctx);
       const split = splitDebit(priced.totalCents, wallet?.promoCents ?? 0, wallet?.paidCents ?? 0);
       if (!wallet || !split) {
         throw unprocessable('INSUFFICIENT_BALANCE', 'Saldo insuficient', {
@@ -155,7 +156,7 @@ export class LedgerService {
       });
       await tx.insert(movementLines).values(priced.lines.map((l) => ({ movementId: input.id, ...l })));
 
-      return { movement: await loadMovement(tx, input.id), balance: toBalance(wristband, updated), replayed: false };
+      return { movement: await loadMovement(tx, input.id), balance: toBalance(wristband, updated, true), replayed: false };
     });
   }
 
@@ -177,6 +178,7 @@ export class LedgerService {
       const wristband = await this.requireActiveWristband(tx, input.wristband);
       const wallet = (await this.lockWallet(tx, wristband.id, ctx.event.organizationId, true))!;
       this.assertWalletActive(wallet);
+      await this.assertActivated(tx, wallet, ctx);
 
       const resulting = wallet.paidCents + wallet.promoCents + input.amountCents;
       if (resulting > ctx.event.maxBalanceCents) {
@@ -198,7 +200,7 @@ export class LedgerService {
         clientCreatedAt: input.clientCreatedAt,
       });
 
-      return { movement: await loadMovement(tx, input.id), balance: toBalance(wristband, updated), replayed: false };
+      return { movement: await loadMovement(tx, input.id), balance: toBalance(wristband, updated, true), replayed: false };
     });
   }
 
@@ -213,7 +215,7 @@ export class LedgerService {
     const replay = async (tx: Tx): Promise<ActivationResult> => {
       const found = await loadMovements(tx, [input.id, depositId]);
       const wristband = await this.wristbandOf(tx, found[0]!.wristbandId!);
-      return { movements: found, balance: await loadBalance(tx, wristband, ctx.event.organizationId), replayed: true };
+      return { movements: found, balance: await loadBalance(tx, wristband, ctx.event), replayed: true };
     };
 
     return this.idempotent(input.id, requestHash, replay, async (tx) => {
@@ -259,7 +261,7 @@ export class LedgerService {
         ids.push(depositId);
       }
 
-      return { movements: await loadMovements(tx, ids), balance: toBalance(wristband, wallet), replayed: false };
+      return { movements: await loadMovements(tx, ids), balance: toBalance(wristband, wallet, true), replayed: false };
     });
   }
 
@@ -308,7 +310,11 @@ export class LedgerService {
         pointOfSaleId: target.pointOfSaleId,
       });
       const wristband = await this.wristbandOf(tx, wallet!.wristbandId);
-      return { movement: await loadMovement(tx, input.id), balance: toBalance(wristband, updated), replayed: false };
+      return {
+        movement: await loadMovement(tx, input.id),
+        balance: toBalance(wristband, updated, await isActivatedInEvent(tx, updated.id, ctx.event.id)),
+        replayed: false,
+      };
     });
   }
 
@@ -371,6 +377,13 @@ export class LedgerService {
     return error;
   }
 
+  /** Per recarregar o comprar, la polsera s'ha d'haver activat (preu pagat) en aquest esdeveniment. */
+  private async assertActivated(tx: Tx, wallet: WalletRow | null, ctx: OperationContext): Promise<void> {
+    if (!wallet || !(await isActivatedInEvent(tx, wallet.id, ctx.event.id))) {
+      throw unprocessable('WRISTBAND_NOT_ACTIVATED', 'La polsera no està activada en aquest esdeveniment: cal activar-la a la taquilla');
+    }
+  }
+
   /** El saldo d'una polsera es pot bloquejar per a una entitat sense afectar-ne les altres. */
   private assertWalletActive(wallet: WalletRow | null): void {
     if (wallet && wallet.status !== 'active') {
@@ -381,7 +394,7 @@ export class LedgerService {
   private async replaySingle(tx: Tx, id: string, ctx: OperationContext): Promise<OperationResult> {
     const movement = await loadMovement(tx, id);
     const wristband = await this.wristbandOf(tx, movement.wristbandId!);
-    return { movement, balance: await loadBalance(tx, wristband, ctx.event.organizationId), replayed: true };
+    return { movement, balance: await loadBalance(tx, wristband, ctx.event), replayed: true };
   }
 
   private assertEventActive(event: EventRow): void {

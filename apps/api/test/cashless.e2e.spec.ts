@@ -321,4 +321,53 @@ describe('Cashless · fase 0', () => {
       expect(res.body.code).toBe('TERMINAL_DISABLED');
     });
   });
+
+  describe('activació per esdeveniment', () => {
+    // Un segon esdeveniment de la mateixa entitat: el saldo és compartit, però cal activar la polsera a cada esdeveniment.
+    let boxOffice2: Client;
+    const OTHER_UID = '04FFEEDDCCBBAA';
+
+    beforeAll(async () => {
+      const event2 = (
+        await admin
+          .post(`/organizations/${orgId}/events`, {
+            name: 'Fira de tardor 2027',
+            slug: 'fira-tardor-2027',
+            startsAt: '2027-10-01T08:00:00Z',
+            endsAt: '2027-10-03T20:00:00Z',
+            wristbandPriceCents: 50,
+          })
+          .expect(201)
+      ).body.id as string;
+      await admin.patch(`/events/${event2}`, { status: 'active' }).expect(200);
+      const box2 = (await admin.post(`/events/${event2}/points-of-sale`, { name: 'Taquilla fira', kind: 'box_office' }).expect(201)).body.id;
+      const op = (await admin.post(`/events/${event2}/operators`, { name: 'Núria', pin: '5555', role: 'box_office' }).expect(201)).body.id;
+      const terminal = (await admin.post(`/events/${event2}/terminals`, { name: 'Taquilla fira 1', pointOfSaleId: box2 }).expect(201))
+        .body as Terminal;
+      boxOffice2 = await loginOperator((await pair(terminal)).client, op, '5555');
+    });
+
+    it('una polsera activada en un altre esdeveniment no es pot recarregar fins que s’activa en aquest', async () => {
+      const before = await boxOffice2.get(`/tpv/balance?uid=${UID}`).expect(200);
+      expect(before.body).toMatchObject({ activatedInEvent: false, paidCents: 100 });
+
+      const denied = await boxOffice2.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(422);
+      expect(denied.body.code).toBe('WRISTBAND_NOT_ACTIVATED');
+
+      const activation = await boxOffice2.post('/tpv/activations', { id: newId(), wristband }).expect(201);
+      expect(activation.body.movements[0]).toMatchObject({ type: 'wristband_fee', amountCents: 50 });
+      expect(activation.body.balance.activatedInEvent).toBe(true);
+
+      const topup = await boxOffice2.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(201);
+      // El saldo és de l'entitat: es manté el que quedava de l'altre esdeveniment.
+      expect(topup.body.balance.paidCents).toBe(600);
+    });
+
+    it('una polsera activada només en un altre esdeveniment no pot comprar en aquest', async () => {
+      await boxOffice2.post('/tpv/activations', { id: newId(), wristband: { uid: OTHER_UID } }).expect(201);
+      await boxOffice2.post('/tpv/topups', { id: newId(), wristband: { uid: OTHER_UID }, amountCents: 1000, method: 'cash' }).expect(201);
+      const res = await cashier.post('/tpv/sales', { id: newId(), wristband: { uid: OTHER_UID }, lines: [{ productId: ids.water, quantity: 1 }] }).expect(422);
+      expect(res.body.code).toBe('WRISTBAND_NOT_ACTIVATED');
+    });
+  });
 });

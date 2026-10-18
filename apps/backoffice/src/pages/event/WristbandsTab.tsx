@@ -67,7 +67,8 @@ export function WristbandsTab() {
             <div className="stat">
               <div className="stat-label">Estat</div>
               <div className="stat-value" style={{ fontSize: '1.1rem' }}>
-                <Badge tone={result.balance.status === 'active' ? 'good' : 'bad'}>{STATUS_LABELS[result.balance.status]}</Badge>
+                <Badge tone={result.balance.status === 'active' ? 'good' : 'bad'}>{STATUS_LABELS[result.balance.status]}</Badge>{' '}
+                {result.balance.activatedInEvent ? <Badge tone="good">Activada aquí</Badge> : <Badge tone="warn">No activada aquí</Badge>}
               </div>
             </div>
             <div className="stat">

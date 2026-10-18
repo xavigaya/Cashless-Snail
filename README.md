@@ -26,6 +26,7 @@ Principis del disseny:
 - **Imports en cèntims** (enters), mai amb decimals.
 - **El saldo pertany a l’entitat organitzadora**, no a la polsera en general: una polsera es pot reutilitzar en esdeveniments de diverses entitats, cadascuna amb el seu saldo.
 - **Saldo promocional i saldo pagat separats:** el promocional (regals, voluntaris) es gasta primer i no es retorna.
+- **Activació per esdeveniment:** per recarregar o comprar, la polsera s’ha d’haver activat (preu de polsera pagat) en aquell esdeveniment, encara que ja tingui saldo d’un altre esdeveniment de la mateixa entitat.
 
 ## Requisits
 
@@ -89,14 +90,13 @@ Fase 0 — prototip:
 | --- | --- |
 | Esquema de base de dades i restriccions | Provat contra PostgreSQL 16 |
 | Lògica compartida (preus, saldos, codis de polsera) | Provada |
-| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | 22 proves de punta a punta en verd, incloses concurrència i duplicats |
+| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | 24 proves de punta a punta en verd, incloses concurrència i duplicats |
 | Servidor: backoffice (entitats, esdeveniments, catàleg, operadors, terminals, resum) | Provat amb les mateixes proves i manualment |
 | Backoffice web | Provat en navegador (ordinador i mòbil) |
 | App TPV (venda, taquilla, NFC, QR) | Compila i s’empaqueta per a Android; **falta provar-la en dispositius reals** |
 
 Qüestions obertes:
 
-- Ara una polsera registrada es pot recarregar en qualsevol entitat sense haver pagat el preu de la polsera en aquell esdeveniment. Cal decidir si la recàrrega ha d’exigir l’activació prèvia.
 - Els administradors es creen amb una contrasenya inicial que tria qui els dona d’alta. A la fase 2 caldrà substituir-ho per una invitació per correu.
 
 Fases següents (vegeu el document d’especificacions): esdeveniment real (multi-venedor complet, cuina amb impressora, funcionament offline, informes PDF i Excel), servei a entitats (recàrrega online, devolucions, promocions, estoc) i escala (node local, analítica, Verifactu).

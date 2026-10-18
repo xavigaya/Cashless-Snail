@@ -19,6 +19,7 @@ Projecte: plataforma cashless multi-entitat per a esdeveniments. L’usuari treb
 - La taula `wallets` és una còpia de treball: ha de coincidir sempre amb la suma dels deltes dels moviments (hi ha una prova que ho verifica).
 - El saldo és per parella (polsera, entitat organitzadora).
 - El saldo promocional es gasta abans que el pagat.
+- Per recarregar o comprar, la polsera ha d’estar activada en l’esdeveniment: hi ha d’haver un moviment `wristband_fee` del seu saldo en aquell esdeveniment (`WRISTBAND_NOT_ACTIVATED` si no).
 
 ## Esquema
 

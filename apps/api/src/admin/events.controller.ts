@@ -27,7 +27,7 @@ import { events, movements, wallets, wristbands } from '../db/schema';
 import { AdminGuard } from '../auth/guards';
 import { assertCanManageOrganization, CurrentAdmin, type AdminPrincipal } from '../auth/principals';
 import { LedgerService } from '../ledger/ledger.service';
-import { listMovements, toBalance } from '../ledger/views';
+import { isActivatedInEvent, listMovements, toBalance } from '../ledger/views';
 import { AdminAccessService } from './admin-access.service';
 import { toEvent } from './mappers';
 import { grantAdminRole } from './organizations.controller';
@@ -137,7 +137,7 @@ export class EventsController {
     @Query(new ZodPipe(wristbandRefSchema)) ref: WristbandRef,
   ): Promise<{ balance: Balance; movements: Movement[] }> {
     const event = await this.access.event(admin, eventId);
-    const balance = await this.ledger.balance(event.organizationId, ref);
+    const balance = await this.ledger.balance(event, ref);
     const page = await listMovements(this.db, and(eq(movements.eventId, eventId), eq(movements.wristbandId, balance.wristbandId))!, {
       limit: 100,
     });
@@ -164,7 +164,7 @@ export class EventsController {
     if (!wallet) throw notFound('Polsera');
     const [wristband] = await this.db.select().from(wristbands).where(eq(wristbands.id, wristbandId)).limit(1);
     await this.access.audit(this.db, admin, { eventId, action: 'wristband.status', targetType: 'wristband', targetId: wristbandId, data: body });
-    return toBalance(wristband!, wallet);
+    return toBalance(wristband!, wallet, await isActivatedInEvent(this.db, wallet.id, eventId));
   }
 
   /** Xifres principals de l'esdeveniment, netes d'anul·lacions. */

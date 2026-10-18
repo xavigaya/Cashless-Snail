@@ -177,7 +177,7 @@ export class TpvService {
   }
 
   balance(terminal: TerminalPrincipal, ref: WristbandRef): Promise<Balance> {
-    return this.ledger.balance(terminal.organizationId, ref);
+    return this.ledger.balance({ id: terminal.eventId, organizationId: terminal.organizationId }, ref);
   }
 
   async recent(terminal: TerminalPrincipal): Promise<Movement[]> {

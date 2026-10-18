@@ -119,6 +119,8 @@ export interface Balance {
   depositCents: number;
   /** Saldo que es pot gastar ara (pagat + promocional). */
   availableCents: number;
+  /** Si s'ha pagat l'activació de la polsera en aquest esdeveniment (cal per recarregar i comprar). */
+  activatedInEvent: boolean;
 }
 
 export interface MovementLine {

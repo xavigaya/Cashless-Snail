@@ -20,6 +20,8 @@ export function errorResult(error: unknown, fallback = 'No s’ha pogut fer l’
       };
     case 'WRISTBAND_BLOCKED':
       return { ok: false, title: 'Polsera bloquejada', detail: 'Envia la persona a la taquilla' };
+    case 'WRISTBAND_NOT_ACTIVATED':
+      return { ok: false, title: 'Polsera no activada', detail: 'Cal activar-la a la taquilla d’aquest esdeveniment' };
     case 'WRISTBAND_NOT_FOUND':
       return { ok: false, title: 'Polsera no activada', detail: 'Cal activar-la a la taquilla' };
     case 'EVENT_NOT_ACTIVE':

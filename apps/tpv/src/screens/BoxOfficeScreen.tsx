@@ -104,6 +104,11 @@ export function BoxOfficeScreen({ api, context, session, onLogout }: { api: TpvA
                   <Text style={ui.muted}>Polsera {formatCode(current.balance.code)}</Text>
                   <Text style={local.balance}>{formatEuros(current.balance.availableCents)}</Text>
                   {current.balance.status !== 'active' && <Text style={ui.error}>Polsera bloquejada: no es pot recarregar</Text>}
+                  {!current.balance.activatedInEvent && (
+                    <Text style={[ui.text, { color: colors.warn, textAlign: 'center' }]}>
+                      No està activada en aquest esdeveniment: cal activar-la ({formatEuros(price + deposit)}) per recarregar i comprar
+                    </Text>
+                  )}
                 </>
               ) : (
                 <>
@@ -122,7 +127,7 @@ export function BoxOfficeScreen({ api, context, session, onLogout }: { api: TpvA
               <BigButton label="Targeta" tone={method === 'card' ? 'accent' : 'neutral'} onPress={() => setMethod('card')} style={{ flex: 1 }} />
             </View>
 
-            {!current.balance ? (
+            {!current.balance || !current.balance.activatedInEvent ? (
               <BigButton label={`Activa · ${formatEuros(price + deposit)}`} tone="accent" busy={busy} onPress={activate} style={{ marginTop: 20, minHeight: 80 }} />
             ) : (
               <>

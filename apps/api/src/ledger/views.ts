@@ -11,6 +11,7 @@ import { movementLines, movements, operators, wallets, wristbands, type WalletRo
 export function toBalance(
   wristband: WristbandRow,
   wallet: Pick<WalletRow, 'paidCents' | 'promoCents' | 'depositCents' | 'status'> | null,
+  activatedInEvent: boolean,
 ): Balance {
   const paidCents = wallet?.paidCents ?? 0;
   const promoCents = wallet?.promoCents ?? 0;
@@ -23,16 +24,28 @@ export function toBalance(
     promoCents,
     depositCents: wallet?.depositCents ?? 0,
     availableCents: status === 'active' ? paidCents + promoCents : 0,
+    activatedInEvent,
   };
 }
 
-export async function loadBalance(db: Queryable, wristband: WristbandRow, organizationId: string): Promise<Balance> {
+/** Una polsera està activada en un esdeveniment si s'hi ha registrat el moviment de preu de polsera. */
+export async function isActivatedInEvent(db: Queryable, walletId: string, eventId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: movements.id })
+    .from(movements)
+    .where(and(eq(movements.walletId, walletId), eq(movements.eventId, eventId), eq(movements.type, 'wristband_fee')))
+    .limit(1);
+  return row !== undefined;
+}
+
+export async function loadBalance(db: Queryable, wristband: WristbandRow, event: { id: string; organizationId: string }): Promise<Balance> {
   const [wallet] = await db
     .select()
     .from(wallets)
-    .where(and(eq(wallets.wristbandId, wristband.id), eq(wallets.organizationId, organizationId)))
+    .where(and(eq(wallets.wristbandId, wristband.id), eq(wallets.organizationId, event.organizationId)))
     .limit(1);
-  return toBalance(wristband, wallet ?? null);
+  const activated = wallet ? await isActivatedInEvent(db, wallet.id, event.id) : false;
+  return toBalance(wristband, wallet ?? null, activated);
 }
 
 /** Carrega moviments complets (amb línies, codi de polsera i nom d'operador), en l'ordre dels ids. */
