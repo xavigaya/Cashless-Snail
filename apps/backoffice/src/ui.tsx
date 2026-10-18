@@ -86,7 +86,7 @@ export function Form({
   busy,
   error,
 }: {
-  onSubmit: () => void | Promise<void>;
+  onSubmit: () => unknown;
   children: ReactNode;
   submitLabel: string;
   busy?: boolean;

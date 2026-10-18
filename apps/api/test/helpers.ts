@@ -36,7 +36,8 @@ export async function createTestApp(): Promise<INestApplication> {
   };
   const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(config)] }).compile();
   const app = configureApp(moduleRef.createNestApplication({ logger: false }), config);
-  await app.init();
+  // Escoltar en un port real evita que supertest obri un servidor nou per a cada petició.
+  await app.listen(0, '127.0.0.1');
   return app;
 }
 

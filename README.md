@@ -3,8 +3,7 @@
 Plataforma cashless multi-entitat per a esdeveniments (festes majors, fires, festivals) de 500 a 10.000 persones.
 Es paga amb polsera NFC o QR; el saldo, en euros, es guarda al servidor.
 
-> **Estat: fase 0 (prototip) en desenvolupament.**
-> El codi de la fase 0 està escrit però **encara no s’ha instal·lat ni provat** (vegeu [Estat](#estat)).
+> **Estat: fase 0 (prototip).** Servidor i backoffice provats; l’app TPV compila però falta provar-la en mòbils reals amb NFC.
 
 ## Com està organitzat
 
@@ -88,17 +87,12 @@ Fase 0 — prototip:
 
 | Peça | Estat |
 | --- | --- |
-| Esquema de base de dades i restriccions | Fet i provat contra PostgreSQL 16 |
-| Lògica compartida (preus, saldos, codis de polsera) | Feta i provada |
-| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | Escrit, pendent de provar |
-| Servidor: backoffice (entitats, esdeveniments, catàleg, operadors, terminals, resum) | Escrit, pendent de provar |
-| Proves de punta a punta del servidor | Escrites, pendents d’executar |
-| Backoffice web | Escrit, pendent de provar |
-| App TPV (venda, taquilla, NFC, QR) | Escrita, pendent de provar en dispositius reals |
-
-El codi es va escriure en un entorn sense accés al registre de npm, per això encara no s’ha pogut instal·lar ni executar.
-Ha passat una revisió independent del servidor (concurrència, idempotència, permisos) i se n’han corregit les incidències.
-El següent pas és `pnpm install`, `pnpm typecheck` i `pnpm test`, i corregir el que surti.
+| Esquema de base de dades i restriccions | Provat contra PostgreSQL 16 |
+| Lògica compartida (preus, saldos, codis de polsera) | Provada |
+| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | 22 proves de punta a punta en verd, incloses concurrència i duplicats |
+| Servidor: backoffice (entitats, esdeveniments, catàleg, operadors, terminals, resum) | Provat amb les mateixes proves i manualment |
+| Backoffice web | Provat en navegador (ordinador i mòbil) |
+| App TPV (venda, taquilla, NFC, QR) | Compila i s’empaqueta per a Android; **falta provar-la en dispositius reals** |
 
 Qüestions obertes:
 

@@ -16,5 +16,10 @@
     "dev:tpv": "pnpm --filter @cashless/tpv start",
     "db:migrate": "pnpm --filter @cashless/api db:migrate",
     "db:seed": "pnpm --filter @cashless/api db:seed"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
