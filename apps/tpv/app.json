@@ -15,7 +15,10 @@
     },
     "android": {
       "package": "cat.cashlesssnail.tpv",
-      "permissions": ["android.permission.NFC", "android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.NFC",
+        "android.permission.CAMERA"
+      ]
     },
     "plugins": [
       [
@@ -32,7 +35,15 @@
           "recordAudioAndroid": false
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ]
   }
 }

@@ -10,7 +10,7 @@ import { colors, sizes } from '../theme';
 
 export function PairScreen({ onPaired }: { onPaired: (api: TpvApi, context: TerminalContext) => void }) {
   const [mode, setMode] = useState<'qr' | 'manual'>('qr');
-  const [apiUrl, setApiUrl] = useState('https://');
+  const [apiUrl, setApiUrl] = useState('http://');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
