@@ -51,6 +51,26 @@ Obre http://localhost:5173 i entra amb `admin@cashless.local` / `canvia-aquesta-
 
 ## 3. App TPV al mòbil
 
+### Opció A: instal·lar l’APK (sense Android Studio)
+
+1. Descarrega `cashless-tpv-0.1.0.apk` al mòbil Android.
+2. Obre el fitxer. Si el mòbil ho demana, permet instal·lar aplicacions d’aquest origen.
+3. Obre **Cashless TPV** i passa al pas 4 de l’opció B (escanejar el QR).
+
+Per generar un APK nou després de canvis al codi (cal l’SDK d’Android):
+
+```bash
+cd apps/tpv
+npx expo prebuild --platform android --clean
+cd android
+./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+# El resultat és a android/app/build/outputs/apk/release/app-release.apk
+```
+
+L’APK es signa amb una clau de proves: serveix per a pilots, però no per publicar-lo a Google Play.
+
+### Opció B: compilar-la i instal·lar-la amb el cable USB
+
 1. Connecta el mòbil a l’ordinador amb el cable USB i accepta el missatge de depuració al mòbil.
 2. El mòbil i l’ordinador han d’estar a la **mateixa wifi**.
 3. Compila i instal·la l’app (la primera vegada triga uns minuts):
