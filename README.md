@@ -28,6 +28,12 @@ Principis del disseny:
 - **Saldo promocional i saldo pagat separats:** el promocional (regals, voluntaris) es gasta primer i no es retorna.
 - **Activació per esdeveniment:** per recarregar o comprar, la polsera s’ha d’haver activat (preu de polsera pagat) en aquell esdeveniment, encara que ja tingui saldo d’un altre esdeveniment de la mateixa entitat.
 
+## Desplegament al núvol
+
+El sistema es pot fer funcionar 100% online, sense cap equip propi: servidor, backoffice i base de dades a [Render](https://render.com) (Frankfurt, UE) i l’app TPV compilada al núvol d’Expo. Cost orientatiu: uns 13 $/mes. Guia pas a pas: [docs/desplegament.md](docs/desplegament.md).
+
+Per provar-ho tot al teu ordinador, vegeu [docs/com-provar.md](docs/com-provar.md).
+
 ## Requisits
 
 - Node.js 22 o superior i [pnpm](https://pnpm.io) 10
@@ -112,5 +118,7 @@ Fases següents (vegeu el document d’especificacions): esdeveniment real (mult
 | Equip | `/events/:id/operators`, `/events/:id/terminals`, `POST /events/:id/terminals/:tid/pairing-code` |
 | Polseres | `GET /events/:id/wristbands/lookup`, `PATCH /events/:id/wristbands/:wid/status` |
 | Terminal | `POST /tpv/pair`, `GET /tpv/context`, `POST /tpv/login`, `GET /tpv/catalog`, `GET /tpv/balance`, `POST /tpv/sales`, `POST /tpv/topups`, `POST /tpv/activations`, `POST /tpv/voids`, `GET /tpv/recent` |
+
+En el desplegament al núvol, totes aquestes rutes van precedides de `/api` (per exemple, `/api/tpv/sales`).
 
 Els terminals s’identifiquen amb la capçalera `X-Terminal-Token`; els operadors i els administradors, amb `Authorization: Bearer <token>`.

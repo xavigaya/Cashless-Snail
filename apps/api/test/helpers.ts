@@ -6,6 +6,7 @@
 import 'reflect-metadata';
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +36,7 @@ export async function createTestApp(): Promise<INestApplication> {
     publicApiUrl: 'http://localhost:3000',
   };
   const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(config)] }).compile();
-  const app = configureApp(moduleRef.createNestApplication({ logger: false }), config);
+  const app = configureApp(moduleRef.createNestApplication<NestExpressApplication>({ logger: false }), config);
   // Escoltar en un port real evita que supertest obri un servidor nou per a cada petició.
   await app.listen(0, '127.0.0.1');
   return app;

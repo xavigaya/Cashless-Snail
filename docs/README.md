@@ -1,6 +1,7 @@
 # Documentació
 
 - **[Com provar-ho tot](com-provar.md)**: instal·lació, app al mòbil i recorregut de prova
+- **[Desplegament 100% online](desplegament.md)**: Render, compilació de l’app al núvol i proves a GitHub
 - **Especificacions del sistema** (decisions, arquitectura, model de dades, fases i punts legals a validar):
   document de treball a claude.ai — https://claude.ai/code/artifact/3aa0b93d-498a-463a-8499-5ca9f2c67308
 

@@ -1,0 +1,52 @@
+# Desplegament a Render (https://render.com) amb un "Blueprint".
+# Crea un servei web (API + backoffice) i una base de dades PostgreSQL, tot a Frankfurt (UE).
+# Guia pas a pas: docs/desplegament.md
+
+databases:
+  - name: cashless-db
+    region: frankfurt
+    postgresMajorVersion: "16"
+    # Pla més petit de pagament. Abans d'un esdeveniment gran, augmenta'l des del panell de Render.
+    plan: 0.1c-256mb
+    databaseName: cashless
+    user: cashless
+
+services:
+  - type: web
+    name: cashless
+    runtime: node
+    region: frankfurt
+    # El pla gratuït s'atura quan no té activitat: no és adequat per a un esdeveniment.
+    plan: 0.5c-512mb
+    # Només s'instal·len les dependències del servidor i del backoffice (no les de l'app mòbil).
+    # NODE_ENV=development a la instal·lació perquè calen les eines de compilació (devDependencies).
+    buildCommand: >-
+      corepack enable &&
+      NODE_ENV=development pnpm install --frozen-lockfile --filter "@cashless/api..." --filter "@cashless/backoffice..." &&
+      pnpm --filter @cashless/shared build &&
+      pnpm --filter @cashless/api build &&
+      VITE_API_URL=/api pnpm --filter @cashless/backoffice build
+    # Abans de cada desplegament: aplica les migracions i, si no n'hi ha cap, crea el primer administrador.
+    preDeployCommand: node apps/api/dist/db/migrate.js && node apps/api/dist/db/bootstrap.js
+    startCommand: node apps/api/dist/main.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cashless-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: API_PREFIX
+        value: api
+      - key: BACKOFFICE_DIST
+        value: apps/backoffice/dist
+      # Es demanen en crear el Blueprint: correu i contrasenya (mínim 12 caràcters) del primer administrador.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false

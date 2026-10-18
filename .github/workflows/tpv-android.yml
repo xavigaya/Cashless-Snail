@@ -1,0 +1,40 @@
+# Compila l'app TPV per a Android al núvol d'Expo (EAS) i en dona un enllaç per instal·lar-la.
+# S'executa a mà: GitHub → Actions → "App TPV Android" → Run workflow.
+# Cal configurar al repositori (Settings → Secrets and variables → Actions):
+#   secret   EXPO_TOKEN       token d'accés del teu compte d'Expo
+#   variable EXPO_PROJECT_ID  identificador del projecte creat a expo.dev
+#   variable EXPO_OWNER       (opcional) compte o organització d'Expo
+name: App TPV Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Perfil de compilació (preview = APK per instal·lar directament)"
+        type: choice
+        options: [preview, production]
+        default: preview
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+      - name: Compila a EAS
+        working-directory: apps/tpv
+        run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive --no-wait
+      - name: On trobar l'APK
+        run: echo "La compilació continua a expo.dev (pestanya Builds del projecte). Quan acabi, hi trobaràs l'enllaç i el QR per instal·lar l'APK."
