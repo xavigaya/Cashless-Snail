@@ -40,7 +40,7 @@ interface AggregateRow extends Record<string, unknown> {
 export function eventRoutes(deps: AppDeps) {
   const { db, access, ledger } = deps;
   const { requireAdmin } = authMiddleware(deps);
-  const app = new Hono<AppEnv>();
+  const app = new Hono<AppEnv>({ strict: false });
 
   const eventId = (c: AppContext) => parseUuid(c.req.param('eventId'), 'eventId');
 
@@ -49,8 +49,8 @@ export function eventRoutes(deps: AppDeps) {
   app.patch('/events/:eventId', requireAdmin, async (c) => {
     const admin = c.get('admin');
     const id = eventId(c);
-    const event = await access.event(admin, id);
     const body = parseInput(updateEventSchema, await readJson(c));
+    const event = await access.event(admin, id);
     const startsAt = body.startsAt ?? event.startsAt;
     const endsAt = body.endsAt ?? event.endsAt;
     if (endsAt <= startsAt) throw badRequest('La data de final ha de ser posterior a la d’inici');
@@ -67,9 +67,9 @@ export function eventRoutes(deps: AppDeps) {
   app.post('/events/:eventId/managers', requireAdmin, async (c) => {
     const admin = c.get('admin');
     const id = eventId(c);
+    const body = parseInput(createAdminUserSchema, await readJson(c));
     const event = await access.event(admin, id);
     assertCanManageOrganization(admin, event.organizationId);
-    const body = parseInput(createAdminUserSchema, await readJson(c));
     const user = await grantAdminRole(db, admin, body, 'event_manager', { eventId: id });
     await access.audit(db, admin, { eventId: id, action: 'event.add_manager', targetType: 'admin_user', targetId: user.id });
     return c.json(user, 201);
@@ -77,8 +77,8 @@ export function eventRoutes(deps: AppDeps) {
 
   app.get('/events/:eventId/movements', requireAdmin, async (c) => {
     const id = eventId(c);
-    await access.event(c.get('admin'), id);
     const query = parseInput(movementQuerySchema, c.req.query());
+    await access.event(c.get('admin'), id);
     const filters: SQL[] = [eq(movements.eventId, id)];
     if (query.type) filters.push(eq(movements.type, query.type));
     return c.json(await listMovements(db, and(...filters)!, { limit: query.limit, cursor: query.cursor }));
@@ -88,8 +88,8 @@ export function eventRoutes(deps: AppDeps) {
   app.post('/events/:eventId/voids', requireAdmin, async (c) => {
     const admin = c.get('admin');
     const id = eventId(c);
-    const event = await access.event(admin, id);
     const body = parseInput(voidSchema, await readJson(c));
+    const event = await access.event(admin, id);
     const result = await ledger.void(
       { event, pointOfSaleId: null, vendorId: null, terminalId: null, operatorId: null, adminUserId: admin.id },
       body,
@@ -103,8 +103,8 @@ export function eventRoutes(deps: AppDeps) {
 
   app.get('/events/:eventId/wristbands/lookup', requireAdmin, async (c) => {
     const id = eventId(c);
-    const event = await access.event(c.get('admin'), id);
     const ref = parseInput(wristbandRefSchema, c.req.query());
+    const event = await access.event(c.get('admin'), id);
     const balance = await ledger.balance(event, ref);
     const page = await listMovements(db, and(eq(movements.eventId, id), eq(movements.wristbandId, balance.wristbandId))!, { limit: 100 });
     return c.json({ balance, movements: page.items });
@@ -118,8 +118,8 @@ export function eventRoutes(deps: AppDeps) {
     const admin = c.get('admin');
     const id = eventId(c);
     const wristbandId = parseUuid(c.req.param('wristbandId'), 'wristbandId');
-    const event = await access.event(admin, id);
     const body = parseInput(wristbandStatusSchema, await readJson(c));
+    const event = await access.event(admin, id);
     const [wallet] = await db
       .update(wallets)
       .set({ status: body.status, updatedAt: new Date() })

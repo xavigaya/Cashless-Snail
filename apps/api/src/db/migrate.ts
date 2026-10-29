@@ -12,6 +12,11 @@ const MIGRATIONS_DIR = join(__dirname, '..', '..', 'migrations');
 const LOCK_ID = 727274; // bloqueig per evitar dues migracions alhora
 
 export async function runMigrations(sql: SqlClient, log: (msg: string) => void = console.log): Promise<string[]> {
+  // Les migracions fan servir un bloqueig de sessió i transaccions explícites: amb el pooler de Supabase
+  // en mode transacció (port 6543) cada ordre podria anar per una connexió diferent.
+  if (String(sql.options.port?.[0] ?? '') === '6543') {
+    throw new Error('Per aplicar migracions a Supabase cal la connexió "Session pooler" (port 5432), no la "Transaction pooler" (6543)');
+  }
   // Una connexió reservada: el bloqueig de sessió i les transaccions han d'anar per la mateixa.
   const conn = await sql.reserve();
   const applied: string[] = [];

@@ -38,12 +38,16 @@ jobs:
       CASHLESS_JWT_SECRET: ${{ secrets.CASHLESS_JWT_SECRET }}
       BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
       BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
-      CORS_ORIGINS: ${{ vars.CORS_ORIGINS || format('https://{0}.github.io', github.repository_owner) }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Comprova la configuració
         run: |
+          # Per defecte, el backoffice de GitHub Pages. El navegador envia l'origen en minúscules.
+          if [ -z "$CORS_ORIGINS" ]; then
+            echo "CORS_ORIGINS=https://${GITHUB_REPOSITORY_OWNER,,}.github.io" >> "$GITHUB_ENV"
+          fi
           missing=""
           for v in SUPABASE_ACCESS_TOKEN DATABASE_URL CASHLESS_JWT_SECRET; do
             [ -n "${!v}" ] || missing="$missing $v"

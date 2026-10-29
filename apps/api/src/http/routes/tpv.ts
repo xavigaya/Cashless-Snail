@@ -43,7 +43,7 @@ const PIN_LOCK_MINUTES = 5;
 export function tpvRoutes(deps: AppDeps) {
   const { db, config, ledger } = deps;
   const { requireTerminal, requireOperator } = authMiddleware(deps);
-  const app = new Hono<AppEnv>();
+  const app = new Hono<AppEnv>({ strict: false });
 
   async function terminalContext(terminalId: string): Promise<TerminalContext> {
     const [row] = await db
@@ -186,35 +186,35 @@ export function tpvRoutes(deps: AppDeps) {
   app.post('/tpv/sales', requireTerminal, requireOperator, async (c) => {
     const terminal = c.get('terminal');
     const operator = c.get('operator');
+    const body = parseInput(saleSchema, await readJson(c));
     if (terminal.posKind === 'box_office') throw forbidden('Una taquilla no pot vendre productes');
     assertOperatorRole(operator.role, SALE_ROLES);
-    const body = parseInput(saleSchema, await readJson(c));
     return c.json(await ledger.sale(await operationContext(terminal, operator), body), 201);
   });
 
   app.post('/tpv/topups', requireTerminal, requireOperator, async (c) => {
     const terminal = c.get('terminal');
     const operator = c.get('operator');
+    const body = parseInput(topupSchema, await readJson(c));
     if (terminal.posKind !== 'box_office') throw forbidden('Les recàrregues es fan a la taquilla');
     assertOperatorRole(operator.role, BOX_OFFICE_ROLES);
-    const body = parseInput(topupSchema, await readJson(c));
     return c.json(await ledger.topup(await operationContext(terminal, operator), body), 201);
   });
 
   app.post('/tpv/activations', requireTerminal, requireOperator, async (c) => {
     const terminal = c.get('terminal');
     const operator = c.get('operator');
+    const body = parseInput(activationSchema, await readJson(c));
     if (terminal.posKind !== 'box_office') throw forbidden('Les polseres s’activen a la taquilla');
     assertOperatorRole(operator.role, BOX_OFFICE_ROLES);
-    const body = parseInput(activationSchema, await readJson(c));
     return c.json(await ledger.activate(await operationContext(terminal, operator), body), 201);
   });
 
   app.post('/tpv/voids', requireTerminal, requireOperator, async (c) => {
     const terminal = c.get('terminal');
     const operator = c.get('operator');
-    assertOperatorRole(operator.role, VOID_ROLES);
     const body = parseInput(voidSchema, await readJson(c));
+    assertOperatorRole(operator.role, VOID_ROLES);
     const result = await ledger.void(await operationContext(terminal, operator), body, {
       allowedTypes: ['sale'],
       pointOfSaleId: terminal.pointOfSaleId,

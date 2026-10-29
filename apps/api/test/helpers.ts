@@ -75,7 +75,7 @@ export class Client {
     return request(this.baseUrl).get(path).set(this.headers);
   }
 
-  post(path: string, body: object = {}) {
+  post(path: string, body: object | string = {}) {
     return request(this.baseUrl).post(path).set(this.headers).send(body);
   }
 

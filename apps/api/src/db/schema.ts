@@ -31,6 +31,9 @@ export const adminUsers = pgTable('admin_users', {
   name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
   active: boolean('active').notNull().default(true),
+  /** Bloqueig per massa contrasenyes errònies (migració 0004). */
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  lockedUntil: tstz('locked_until'),
   createdAt: createdAt(),
 });
 

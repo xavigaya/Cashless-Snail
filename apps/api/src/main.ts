@@ -9,7 +9,7 @@ import { serve, type ServerType } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import type { Context, Hono } from 'hono';
-import { forwardedIp } from './common/rate-limit';
+import { proxiedIp } from './common/rate-limit';
 import { loadEnvFile, readConfig, type AppConfig } from './config';
 import { createDb, createSql, type SqlClient } from './db/db';
 import { createApp } from './http/app';
@@ -20,15 +20,19 @@ export interface RunningServer {
   close: () => Promise<void>;
 }
 
-/** IP del client: la del proxy si n'hi ha (Render), si no la de la connexió. */
-function nodeClientIp(c: Context): string {
-  const viaProxy = forwardedIp(c, '');
-  if (viaProxy) return viaProxy;
-  try {
-    return getConnInfo(c).remote.address ?? 'desconeguda';
-  } catch {
-    return 'desconeguda';
-  }
+/** IP del client: la que afegeix el proxy de confiança (TRUST_PROXY=1, p. ex. Render) o la de la connexió. */
+function nodeClientIp(trustProxy: boolean): (c: Context) => string {
+  return (c) => {
+    if (trustProxy) {
+      const viaProxy = proxiedIp(c);
+      if (viaProxy) return viaProxy;
+    }
+    try {
+      return getConnInfo(c).remote.address ?? 'desconeguda';
+    } catch {
+      return 'desconeguda';
+    }
+  };
 }
 
 /**
@@ -57,7 +61,7 @@ function serveBackoffice(app: Hono, dir: string, apiPrefix?: string): void {
 }
 
 export function startServer(config: AppConfig, sql: SqlClient = createSql(config.databaseUrl), port = config.port): Promise<RunningServer> {
-  const app = createApp({ db: createDb(sql), config, clientIp: nodeClientIp });
+  const app = createApp({ db: createDb(sql), config, clientIp: nodeClientIp(config.trustProxy ?? false) });
   if (config.backofficeDir) serveBackoffice(app, config.backofficeDir, config.apiPrefix);
 
   return new Promise((resolve) => {

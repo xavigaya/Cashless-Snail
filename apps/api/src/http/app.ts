@@ -3,6 +3,7 @@
  * i per a l'Edge Function de Supabase (Deno): només canvia l'entrada.
  */
 import { Hono, type Context, type Env } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { sql } from 'drizzle-orm';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -22,6 +23,10 @@ import { organizationRoutes } from './routes/organizations';
 import { staffRoutes } from './routes/staff';
 import { tpvRoutes } from './routes/tpv';
 
+const MAX_BODY_BYTES = 100 * 1024;
+// Com abans (Express): /events i /events/ són la mateixa ruta.
+const ROUTER_OPTIONS = { strict: false } as const;
+
 export interface CreateAppOptions {
   db: Db;
   config: AppConfig;
@@ -37,7 +42,7 @@ export function createApi(options: CreateAppOptions): Hono<AppEnv> {
     access: new AdminAccess(options.db),
     clientIp: options.clientIp,
   };
-  const api = new Hono<AppEnv>();
+  const api = new Hono<AppEnv>(ROUTER_OPTIONS);
 
   api.use(
     '*',
@@ -48,7 +53,31 @@ export function createApi(options: CreateAppOptions): Hono<AppEnv> {
       maxAge: 600,
     }),
   );
-  api.use('*', rateLimit({ paths: ['/auth/login', '/tpv/pair', '/tpv/login'], max: 10, windowMs: 60_000, clientIp: deps.clientIp }));
+  // Molts terminals poden compartir una mateixa IP (la wifi de l'esdeveniment): el PIN i la
+  // vinculació tenen marge; el PIN es bloqueja igualment per operador després de 5 errors.
+  api.use(
+    '*',
+    rateLimit({
+      rules: [
+        { path: '/auth/login', max: 10 },
+        { path: '/tpv/login', max: 60 },
+        { path: '/tpv/pair', max: 30 },
+      ],
+      windowMs: 60_000,
+      clientIp: deps.clientIp,
+    }),
+  );
+  // Cap petició legítima de l'API passa de pocs kB.
+  api.use(
+    '*',
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) => {
+        const body: ApiError = { statusCode: 413, code: 'VALIDATION_ERROR', message: 'La petició és massa gran' };
+        return c.json(body, 413);
+      },
+    }),
+  );
 
   /** Comprovació de salut per a monitoratge. */
   api.get('/health', async (c) => {
@@ -75,7 +104,7 @@ export function createApp(options: CreateAppOptions): Hono {
   const api = createApi(options);
   const prefix = options.config.apiPrefix;
   if (!prefix) return api as unknown as Hono;
-  const app = new Hono();
+  const app = new Hono(ROUTER_OPTIONS);
   app.route(`/${prefix}`, api);
   attachErrorHandlers(app);
   return app;

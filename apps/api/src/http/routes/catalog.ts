@@ -13,19 +13,13 @@ import { notFound, parseInput, parseUuid, unprocessable } from '../../common/err
 import { organizations, pointsOfSale, products, vendors } from '../../db/schema';
 import { toPointOfSale, toProduct, toVendor } from '../../admin/mappers';
 import { authMiddleware } from '../auth-middleware';
-import { readJson, type AppContext, type AppDeps, type AppEnv } from '../context';
+import { readJson, type AppDeps, type AppEnv } from '../context';
 
 export function catalogRoutes(deps: AppDeps) {
   const { db, access } = deps;
   const { requireAdmin } = authMiddleware(deps);
-  const app = new Hono<AppEnv>();
+  const app = new Hono<AppEnv>({ strict: false });
 
-  /** Comprova el permís sobre l'esdeveniment i en retorna l'identificador. */
-  async function eventOf(c: AppContext): Promise<string> {
-    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
-    await access.event(c.get('admin'), eventId);
-    return eventId;
-  }
 
   async function assertVendorInEvent(eventId: string, vendorId: string): Promise<void> {
     const [vendor] = await db
@@ -44,13 +38,15 @@ export function catalogRoutes(deps: AppDeps) {
   // ---------- Venedors ----------
 
   app.get('/events/:eventId/vendors', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    await access.event(c.get('admin'), eventId);
     return c.json((await db.select().from(vendors).where(eq(vendors.eventId, eventId)).orderBy(asc(vendors.name))).map(toVendor));
   });
 
   app.post('/events/:eventId/vendors', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const body = parseInput(createVendorSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     if (body.organizationId) await assertOrganizationExists(body.organizationId);
     const [row] = await db
       .insert(vendors)
@@ -60,9 +56,10 @@ export function catalogRoutes(deps: AppDeps) {
   });
 
   app.patch('/events/:eventId/vendors/:vendorId', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const vendorId = parseUuid(c.req.param('vendorId'), 'vendorId');
     const body = parseInput(updateVendorSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     if (body.organizationId) await assertOrganizationExists(body.organizationId);
     const [row] = await db
       .update(vendors)
@@ -76,14 +73,16 @@ export function catalogRoutes(deps: AppDeps) {
   // ---------- Punts de venda ----------
 
   app.get('/events/:eventId/points-of-sale', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    await access.event(c.get('admin'), eventId);
     const rows = await db.select().from(pointsOfSale).where(eq(pointsOfSale.eventId, eventId)).orderBy(asc(pointsOfSale.name));
     return c.json(rows.map(toPointOfSale));
   });
 
   app.post('/events/:eventId/points-of-sale', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const body = parseInput(createPointOfSaleSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     if (body.vendorId) await assertVendorInEvent(eventId, body.vendorId);
     const [row] = await db
       .insert(pointsOfSale)
@@ -93,9 +92,10 @@ export function catalogRoutes(deps: AppDeps) {
   });
 
   app.patch('/events/:eventId/points-of-sale/:posId', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const posId = parseUuid(c.req.param('posId'), 'posId');
     const body = parseInput(updatePointOfSaleSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     const [row] = await db
       .update(pointsOfSale)
       .set(body)
@@ -108,7 +108,8 @@ export function catalogRoutes(deps: AppDeps) {
   // ---------- Productes ----------
 
   app.get('/events/:eventId/products', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    await access.event(c.get('admin'), eventId);
     const rows = await db
       .select()
       .from(products)
@@ -118,8 +119,9 @@ export function catalogRoutes(deps: AppDeps) {
   });
 
   app.post('/events/:eventId/products', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const body = parseInput(createProductSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     await assertVendorInEvent(eventId, body.vendorId);
     const [row] = await db
       .insert(products)
@@ -130,9 +132,10 @@ export function catalogRoutes(deps: AppDeps) {
 
   app.patch('/events/:eventId/products/:productId', requireAdmin, async (c) => {
     const admin = c.get('admin');
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const productId = parseUuid(c.req.param('productId'), 'productId');
     const body = parseInput(updateProductSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     const [before] = await db
       .select()
       .from(products)

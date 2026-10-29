@@ -43,6 +43,9 @@ services:
         generateValue: true
       - key: API_PREFIX
         value: api
+      # Render posa un proxy davant del servei: la IP real del client ve a X-Forwarded-For.
+      - key: TRUST_PROXY
+        value: "1"
       - key: BACKOFFICE_DIST
         value: apps/backoffice/dist
       # Es demanen en crear el Blueprint: correu i contrasenya (mínim 12 caràcters) del primer administrador.

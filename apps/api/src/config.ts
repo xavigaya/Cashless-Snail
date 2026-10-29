@@ -25,6 +25,8 @@ export interface AppConfig {
   apiPrefix?: string;
   /** Carpeta amb el backoffice compilat. Si s'indica, el mateix servidor el serveix. */
   backofficeDir?: string;
+  /** Hi ha un proxy de confiança davant (Render): la IP del client surt de X-Forwarded-For. */
+  trustProxy?: boolean;
 }
 
 export function readConfig(): AppConfig {
@@ -48,6 +50,7 @@ export function readConfig(): AppConfig {
     publicApiUrl: process.env.PUBLIC_API_URL ?? (external ? `${external}${suffix}` : `http://localhost:${port}${suffix}`),
     apiPrefix: apiPrefix || undefined,
     backofficeDir: process.env.BACKOFFICE_DIST ? resolve(process.env.BACKOFFICE_DIST) : undefined,
+    trustProxy: process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true',
   };
 }
 

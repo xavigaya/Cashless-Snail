@@ -7,7 +7,7 @@ import { notFound, parseInput, parseUuid, unprocessable } from '../../common/err
 import { operators, pointsOfSale, terminals } from '../../db/schema';
 import { toOperator, toTerminal } from '../../admin/mappers';
 import { authMiddleware } from '../auth-middleware';
-import { readJson, type AppContext, type AppDeps, type AppEnv } from '../context';
+import { readJson, type AppDeps, type AppEnv } from '../context';
 
 const PAIRING_MINUTES = 30;
 
@@ -18,13 +18,8 @@ function newPairing(): { pairingCode: string; pairingExpiresAt: Date } {
 export function staffRoutes(deps: AppDeps) {
   const { db, access } = deps;
   const { requireAdmin } = authMiddleware(deps);
-  const app = new Hono<AppEnv>();
+  const app = new Hono<AppEnv>({ strict: false });
 
-  async function eventOf(c: AppContext): Promise<string> {
-    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
-    await access.event(c.get('admin'), eventId);
-    return eventId;
-  }
 
   async function assertPointOfSaleInEvent(eventId: string, posId: string): Promise<void> {
     const [pos] = await db
@@ -38,13 +33,15 @@ export function staffRoutes(deps: AppDeps) {
   // ---------- Operadors ----------
 
   app.get('/events/:eventId/operators', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    await access.event(c.get('admin'), eventId);
     return c.json((await db.select().from(operators).where(eq(operators.eventId, eventId)).orderBy(asc(operators.name))).map(toOperator));
   });
 
   app.post('/events/:eventId/operators', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const body = parseInput(createOperatorSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     const [row] = await db
       .insert(operators)
       .values({ eventId, name: body.name, role: body.role, pinHash: await hashSecret(body.pin) })
@@ -53,9 +50,10 @@ export function staffRoutes(deps: AppDeps) {
   });
 
   app.patch('/events/:eventId/operators/:operatorId', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const operatorId = parseUuid(c.req.param('operatorId'), 'operatorId');
     const { pin, ...rest } = parseInput(updateOperatorSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     const changes = pin ? { ...rest, pinHash: await hashSecret(pin), failedAttempts: 0, lockedUntil: null } : rest;
     const [row] = await db
       .update(operators)
@@ -69,14 +67,16 @@ export function staffRoutes(deps: AppDeps) {
   // ---------- Terminals ----------
 
   app.get('/events/:eventId/terminals', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    await access.event(c.get('admin'), eventId);
     return c.json((await db.select().from(terminals).where(eq(terminals.eventId, eventId)).orderBy(asc(terminals.name))).map(toTerminal));
   });
 
   /** Crea un terminal amb un codi de vinculació vàlid durant 30 minuts. */
   app.post('/events/:eventId/terminals', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const body = parseInput(createTerminalSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     await assertPointOfSaleInEvent(eventId, body.pointOfSaleId);
     const [row] = await db
       .insert(terminals)
@@ -87,9 +87,10 @@ export function staffRoutes(deps: AppDeps) {
   });
 
   app.patch('/events/:eventId/terminals/:terminalId', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const terminalId = parseUuid(c.req.param('terminalId'), 'terminalId');
     const body = parseInput(updateTerminalSchema, await readJson(c));
+    await access.event(c.get('admin'), eventId);
     if (body.pointOfSaleId) await assertPointOfSaleInEvent(eventId, body.pointOfSaleId);
     const [row] = await db
       .update(terminals)
@@ -108,8 +109,9 @@ export function staffRoutes(deps: AppDeps) {
    * El dispositiu anterior continua funcionant fins que se'n vinculi un de nou.
    */
   app.post('/events/:eventId/terminals/:terminalId/pairing-code', requireAdmin, async (c) => {
-    const eventId = await eventOf(c);
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
     const terminalId = parseUuid(c.req.param('terminalId'), 'terminalId');
+    await access.event(c.get('admin'), eventId);
     const [row] = await db
       .update(terminals)
       .set(newPairing())

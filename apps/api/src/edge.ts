@@ -12,9 +12,8 @@
  *   CORS_ORIGINS                   orígens permesos del backoffice, separats per comes
  *   DATABASE_URL                   (opcional) per fer servir una altra base de dades
  */
-import type { Context } from 'hono';
 import type { AppConfig } from './config';
-import { forwardedIp } from './common/rate-limit';
+import { edgeClientIp } from './common/rate-limit';
 import { createDb, createSql } from './db/db';
 import { createApp } from './http/app';
 
@@ -47,6 +46,6 @@ const config: AppConfig = {
 
 // Poques connexions: Supabase pot tenir diverses instàncies de la funció alhora.
 const db = createDb(createSql(config.databaseUrl, { max: 3 }));
-const app = createApp({ db, config, clientIp: (c: Context) => forwardedIp(c, 'desconeguda') });
+const app = createApp({ db, config, clientIp: edgeClientIp });
 
 Deno.serve(app.fetch);

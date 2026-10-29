@@ -24,7 +24,7 @@ import { readJson, type AppDeps, type AppEnv } from '../context';
 export function organizationRoutes(deps: AppDeps) {
   const { db, access } = deps;
   const { requireAdmin } = authMiddleware(deps);
-  const app = new Hono<AppEnv>();
+  const app = new Hono<AppEnv>({ strict: false });
 
   /** Entitats visibles per a l'usuari: totes si és admin de plataforma; si no, les seves. */
   async function visibleOrganizations(admin: AdminPrincipal): Promise<Organization[]> {
@@ -50,8 +50,8 @@ export function organizationRoutes(deps: AppDeps) {
 
   app.post('/organizations', requireAdmin, async (c) => {
     const admin = c.get('admin');
-    assertPlatformAdmin(admin);
     const body = parseInput(createOrganizationSchema, await readJson(c));
+    assertPlatformAdmin(admin);
     const [row] = await db
       .insert(organizations)
       .values({ name: body.name, taxId: body.taxId ?? null, taxRegime: body.taxRegime })
@@ -72,8 +72,8 @@ export function organizationRoutes(deps: AppDeps) {
   app.post('/organizations/:orgId/admins', requireAdmin, async (c) => {
     const admin = c.get('admin');
     const orgId = parseUuid(c.req.param('orgId'), 'orgId');
-    assertCanManageOrganization(admin, orgId);
     const body = parseInput(createAdminUserSchema, await readJson(c));
+    assertCanManageOrganization(admin, orgId);
     const user = await grantAdminRole(db, admin, body, 'org_admin', { organizationId: orgId });
     await access.audit(db, admin, { action: 'organization.add_admin', targetType: 'admin_user', targetId: user.id });
     return c.json(user, 201);
@@ -89,8 +89,8 @@ export function organizationRoutes(deps: AppDeps) {
   app.post('/organizations/:orgId/events', requireAdmin, async (c) => {
     const admin = c.get('admin');
     const orgId = parseUuid(c.req.param('orgId'), 'orgId');
-    assertCanManageOrganization(admin, orgId);
     const body = parseInput(createEventSchema, await readJson(c));
+    assertCanManageOrganization(admin, orgId);
     const [row] = await db
       .insert(events)
       .values({ organizationId: orgId, ...body })

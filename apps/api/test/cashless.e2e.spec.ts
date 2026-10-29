@@ -382,9 +382,33 @@ describe('Cashless · fase 0', () => {
       expect(res.body.code).toBe('VALIDATION_ERROR');
     });
 
+    it('rebutja els cossos massa grans', async () => {
+      const res = await admin.post('/organizations', { name: 'x'.repeat(200_000), taxRegime: 'association' }).expect(413);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('un cos que no és JSON no es llegeix', async () => {
+      const res = await api.with({ 'Content-Type': 'text/plain' }).post('/auth/login', 'email=admin@test.cat').expect(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('bloqueja el compte després de massa contrasenyes errònies', async () => {
+      await createPlatformAdmin('bloqueig@test.cat', 'contrasenya-correcta');
+      const sql = testSql();
+      try {
+        // Simula els intents anteriors: el límit per adreça impedeix fer-ne 10 en un minut.
+        await sql`UPDATE admin_users SET failed_attempts = 9 WHERE email = 'bloqueig@test.cat'`;
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+      await api.post('/auth/login', { email: 'bloqueig@test.cat', password: 'incorrecta-1234' }).expect(401);
+      const res = await api.post('/auth/login', { email: 'bloqueig@test.cat', password: 'contrasenya-correcta' }).expect(429);
+      expect(res.body.code).toBe('ACCOUNT_LOCKED');
+    });
+
     it('limita els intents de vinculació des d’una mateixa adreça', async () => {
       const statuses: number[] = [];
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 40; i++) {
         const res = await api.post('/tpv/pair', { pairingCode: 'ZZZZZZZZ' });
         statuses.push(res.status);
         if (res.status === 429) {

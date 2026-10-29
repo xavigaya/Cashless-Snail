@@ -25,8 +25,12 @@ export interface AppEnv {
 
 export type AppContext = Context<AppEnv>;
 
-/** Llegeix el cos JSON de la petició. Un cos buit o mal format es tracta com a objecte buit (la validació avisarà). */
+/**
+ * Llegeix el cos JSON de la petició. Només s'accepta "Content-Type: application/json" (com abans);
+ * un cos buit, mal format o d'un altre tipus es tracta com a objecte buit i la validació avisarà.
+ */
 export async function readJson(c: AppContext): Promise<unknown> {
+  if (!c.req.header('content-type')?.toLowerCase().includes('application/json')) return {};
   try {
     return await c.req.json();
   } catch {

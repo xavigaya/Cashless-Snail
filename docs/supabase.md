@@ -111,7 +111,8 @@ Desa el fitxer en un lloc segur, perquè conté dades personals i econòmiques.
 
 - **API de Supabase tancada.** Supabase publica automàticament una API REST de les taules amb una clau pública. La migració `0003_tancar_api_publica.sql` activa *Row Level Security* a totes les taules i retira els permisos als rols públics, de manera que només l’Edge Function hi té accés. Al panell, *Advisors → Security* no ha de mostrar cap avís de taules exposades.
 - **Autenticació pròpia.** L’Edge Function no fa servir l’autenticació de Supabase (`verify_jwt = false`): els administradors, els terminals i els operadors s’autentiquen amb el sistema de l’API, igual que a la versió local.
-- **Límit d’intents.** Les entrades amb contrasenya, PIN o codi de vinculació estan limitades a 10 per minut i adreça. A Supabase el comptador és per instància de la funció, però el bloqueig del PIN després de 5 errors es guarda a la base de dades i és exacte.
+- **Límit d’intents.** Per adreça i minut: 10 inicis de sessió al backoffice, 60 entrades amb PIN i 30 vinculacions de terminal. A Supabase el comptador és per instància de la funció; per això els bloquejos importants es guarden a la base de dades i són exactes: un compte del backoffice es bloqueja 15 minuts després de 10 contrasenyes errònies, i un operador després de 5 PIN erronis.
+- **Mida de les peticions.** L’API rebutja els cossos de més de 100 KB i només llegeix els que són `application/json`.
 - **Tot va per HTTPS**, i les dades es guarden a la UE (Frankfurt).
 
 ## Si alguna cosa no funciona

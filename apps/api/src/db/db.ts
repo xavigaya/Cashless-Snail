@@ -24,6 +24,8 @@ export function createSql(databaseUrl: string, options: SqlOptions = {}): SqlCli
     // El pooler de Supabase en mode transacció no admet sentències preparades.
     prepare: false,
     idle_timeout: 20,
+    // Renova les connexions periòdicament (a Supabase la funció es pot congelar entre peticions).
+    max_lifetime: 5 * 60,
     onnotice: () => undefined,
     connection: { application_name: 'cashless-snail' },
   });
