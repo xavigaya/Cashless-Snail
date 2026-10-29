@@ -1,0 +1,18 @@
+# Manté actiu el projecte gratuït de Supabase.
+# Supabase posa en pausa els projectes del pla gratuït després d'una setmana sense activitat.
+# Aquesta tasca fa una consulta a l'API cada 3 dies (que llegeix la base de dades).
+# Per desactivar-la: Actions → "Manté Supabase actiu" → Disable workflow.
+name: Manté Supabase actiu
+
+on:
+  schedule:
+    - cron: "17 7 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    if: vars.SUPABASE_PROJECT_REF != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consulta l'estat de l'API
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 20 --retry-all-errors "https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/api/health"

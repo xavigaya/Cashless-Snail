@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { formatEuros } from '@cashless/shared';
 import { loadEnvFile } from '../config';
 import { generatePairingCode, hashSecret } from '../common/crypto';
-import { createDb, createPool } from './db';
+import { createDb, createSql } from './db';
 import { runMigrations } from './migrate';
 import { adminUsers, events, operators, organizations, pointsOfSale, products, roleAssignments, terminals, vendors } from './schema';
 
@@ -17,10 +17,10 @@ async function main(): Promise<void> {
   loadEnvFile();
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('Falta DATABASE_URL');
-  const pool = createPool(url);
-  const db = createDb(pool);
+  const client = createSql(url, { max: 1 });
+  const db = createDb(client);
   try {
-    await runMigrations(pool);
+    await runMigrations(client);
 
     const email = process.env.SEED_ADMIN_EMAIL ?? 'admin@cashless.local';
     const password = process.env.SEED_ADMIN_PASSWORD ?? 'canvia-aquesta-contrasenya';
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     console.log('\nCodis de vinculació dels terminals (vàlids 24 hores):');
     for (const t of terminalRows) console.log(`  ${t.name}: ${t.pairingCode}`);
   } finally {
-    await pool.end();
+    await client.end({ timeout: 5 });
   }
 }
 

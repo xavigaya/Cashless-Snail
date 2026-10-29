@@ -1,62 +1,88 @@
-import 'reflect-metadata';
-import { join } from 'node:path';
-import { existsSync } from 'node:fs';
-import { NestFactory } from '@nestjs/core';
-import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { NextFunction, Request, Response } from 'express';
-import { AppModule } from './app.module';
-import { ApiExceptionFilter } from './common/errors';
-import { rateLimit } from './common/rate-limit';
+/**
+ * Entrada del servidor per a Node (versió local i Render).
+ * La mateixa API es desplega a Supabase amb src/edge.ts.
+ */
+import { readFileSync, existsSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import type { Server } from 'node:http';
+import { serve, type ServerType } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { getConnInfo } from '@hono/node-server/conninfo';
+import type { Context, Hono } from 'hono';
+import { forwardedIp } from './common/rate-limit';
 import { loadEnvFile, readConfig, type AppConfig } from './config';
-import { TERMINAL_TOKEN_HEADER } from './auth/guards';
+import { createDb, createSql, type SqlClient } from './db/db';
+import { createApp } from './http/app';
 
-/** Configura l'aplicació. Es fa servir tant per arrencar el servidor com a les proves. */
-export function configureApp(app: NestExpressApplication, config: AppConfig): NestExpressApplication {
-  // Darrere del proxy de la plataforma: així req.ip és la IP real del client.
-  app.set('trust proxy', 1);
-  app.disable('x-powered-by');
-  if (config.apiPrefix) app.setGlobalPrefix(config.apiPrefix);
+export interface RunningServer {
+  server: ServerType;
+  url: string;
+  close: () => Promise<void>;
+}
 
-  app.useGlobalFilters(new ApiExceptionFilter());
-  app.enableCors({
-    origin: config.corsOrigins,
-    allowedHeaders: ['Content-Type', 'Authorization', TERMINAL_TOKEN_HEADER],
-  });
-  app.use(rateLimit({ paths: ['/auth/login', '/tpv/pair', '/tpv/login'], max: 10, windowMs: 60_000 }));
-
-  if (config.backofficeDir) serveBackoffice(app, config.backofficeDir, config.apiPrefix);
-
-  app.enableShutdownHooks();
-  return app;
+/** IP del client: la del proxy si n'hi ha (Render), si no la de la connexió. */
+function nodeClientIp(c: Context): string {
+  const viaProxy = forwardedIp(c, '');
+  if (viaProxy) return viaProxy;
+  try {
+    return getConnInfo(c).remote.address ?? 'desconeguda';
+  } catch {
+    return 'desconeguda';
+  }
 }
 
 /**
- * Serveix el backoffice compilat des del mateix servidor (un sol servei al núvol).
- * Qualsevol ruta que no sigui de l'API ni un fitxer retorna index.html (aplicació d'una sola pàgina).
+ * Serveix el backoffice compilat des del mateix servidor (un sol servei).
+ * Qualsevol ruta GET que no sigui de l'API ni un fitxer retorna index.html (aplicació d'una sola pàgina).
  */
-function serveBackoffice(app: NestExpressApplication, dir: string, apiPrefix?: string): void {
-  const index = join(dir, 'index.html');
-  if (!existsSync(index)) throw new Error(`No es troba el backoffice compilat a ${dir}`);
+function serveBackoffice(app: Hono, dir: string, apiPrefix?: string): void {
+  const indexPath = join(dir, 'index.html');
+  if (!existsSync(indexPath)) throw new Error(`No es troba el backoffice compilat a ${dir}`);
   if (!apiPrefix) throw new Error('Per servir el backoffice cal definir API_PREFIX (p. ex. "api")');
+  const index = readFileSync(indexPath, 'utf8');
+  const root = relative(process.cwd(), dir) || '.';
 
-  app.useStaticAssets(dir, { index: false, maxAge: '1h' });
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const isApi = req.path === `/${apiPrefix}` || req.path.startsWith(`/${apiPrefix}/`);
-    if (req.method !== 'GET' || isApi) {
-      next();
-      return;
+  app.get('*', async (c, next) => {
+    const path = c.req.path;
+    if (path === `/${apiPrefix}` || path.startsWith(`/${apiPrefix}/`)) return next();
+    // index.html sempre fresc (apunta als fitxers de la versió actual); la resta, a la memòria cau.
+    if (path === '/' || path.endsWith('/index.html')) return c.html(index, 200, { 'Cache-Control': 'no-cache' });
+    const file = await serveStatic({ root })(c, async () => undefined);
+    if (file) {
+      file.headers.set('Cache-Control', 'public, max-age=3600');
+      return file;
     }
-    res.setHeader('Cache-Control', 'no-cache');
-    res.sendFile(index);
+    return c.html(index, 200, { 'Cache-Control': 'no-cache' });
+  });
+}
+
+export function startServer(config: AppConfig, sql: SqlClient = createSql(config.databaseUrl), port = config.port): Promise<RunningServer> {
+  const app = createApp({ db: createDb(sql), config, clientIp: nodeClientIp });
+  if (config.backofficeDir) serveBackoffice(app, config.backofficeDir, config.apiPrefix);
+
+  return new Promise((resolve) => {
+    const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {
+      resolve({
+        server,
+        url: `http://127.0.0.1:${info.port}`,
+        close: () =>
+          new Promise<void>((done) => {
+            (server as Server).close(() => done());
+            (server as Server).closeAllConnections?.();
+          }).then(() => sql.end({ timeout: 5 })),
+      });
+    });
   });
 }
 
 async function bootstrap(): Promise<void> {
   loadEnvFile();
   const config = readConfig();
-  const app = configureApp(await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config)), config);
-  await app.listen(config.port, '0.0.0.0');
+  const running = await startServer(config);
   console.log(`API escoltant al port ${config.port} · adreça pública: ${config.publicApiUrl}`);
+  const stop = () => void running.close().then(() => process.exit(0));
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
 }
 
 if (require.main === module) {

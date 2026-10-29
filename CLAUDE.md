@@ -9,6 +9,13 @@ Projecte: plataforma cashless multi-entitat per a esdeveniments. L’usuari treb
 - `pnpm test` — proves de punta a punta de l’API. Necessiten `TEST_DATABASE_URL` cap a una base de dades buida (s’esborra).
 - `pnpm --filter @cashless/shared test` — proves de la lògica pura.
 - `pnpm db:migrate`, `pnpm db:seed`.
+- `pnpm --filter @cashless/api build:edge` — genera l’Edge Function de Supabase (`supabase/functions/api/api.js`, no es versiona).
+- Per provar l’Edge Function: executa-la amb Deno i passa les proves amb `TEST_API_URL=http://127.0.0.1:8000/api` (vegeu `.github/workflows/ci.yml`).
+
+## Arquitectura de l’API
+
+- Hono + Drizzle (driver postgres-js). El mateix codi s’executa a Node (`src/main.ts`: versió local i Render) i a Deno (`src/edge.ts`: Supabase). No facis servir APIs exclusives de Node fora de `main.ts` i dels scripts de `src/db/`; per a mòduls de Node, importa’ls amb el prefix `node:` (`node:crypto`, `node:buffer`).
+- Les rutes són a `src/http/routes/`; cada ruta protegida declara el seu middleware (`requireAdmin`, `requireTerminal`, `requireOperator`).
 
 ## Regles del domini (no les trenquis)
 
@@ -24,6 +31,8 @@ Projecte: plataforma cashless multi-entitat per a esdeveniments. L’usuari treb
 ## Esquema
 
 Les migracions SQL de `apps/api/migrations` són la font de veritat. `apps/api/src/db/schema.ts` (Drizzle) ha de coincidir-hi. Per canviar l’esquema, afegeix un fitxer nou `000N_descripcio.sql`; no modifiquis migracions ja aplicades.
+
+Cada taula nova ha d’activar Row Level Security (`ALTER TABLE … ENABLE ROW LEVEL SECURITY;`) sense polítiques: a Supabase, això impedeix que l’API REST pública hi accedeixi (vegeu la migració 0003).
 
 ## Errors
 

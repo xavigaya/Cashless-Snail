@@ -2,20 +2,20 @@
  * Crea el primer administrador de plataforma en un desplegament nou.
  * Només actua si encara no n'hi ha cap; si ja n'hi ha, no fa res.
  * Fa servir BOOTSTRAP_ADMIN_EMAIL i BOOTSTRAP_ADMIN_PASSWORD.
- * Ús: node dist/db/bootstrap.js (s'executa automàticament en cada desplegament a Render)
+ * Ús: node dist/db/bootstrap.js (s'executa automàticament en cada desplegament)
  */
 import { eq, sql } from 'drizzle-orm';
 import { loadEnvFile } from '../config';
 import { hashSecret } from '../common/crypto';
-import { createDb, createPool } from './db';
+import { createDb, createSql } from './db';
 import { adminUsers, roleAssignments } from './schema';
 
 async function main(): Promise<void> {
   loadEnvFile();
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('Falta DATABASE_URL');
-  const pool = createPool(url);
-  const db = createDb(pool);
+  const client = createSql(url, { max: 1 });
+  const db = createDb(client);
   try {
     const [existing] = await db.select({ id: roleAssignments.id }).from(roleAssignments).where(eq(roleAssignments.role, 'platform_admin')).limit(1);
     if (existing) {
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     await db.insert(roleAssignments).values({ userId: user.id, role: 'platform_admin' });
     console.log(`Administrador de plataforma ${found ? 'assignat' : 'creat'}: ${email}`);
   } finally {
-    await pool.end();
+    await client.end({ timeout: 5 });
   }
 }
 

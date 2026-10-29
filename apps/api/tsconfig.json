@@ -3,12 +3,18 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "outDir": "dist",
     "rootDir": "src",
     "declaration": false,
-    "types": ["node", "jest"]
+    "types": [
+      "node",
+      "jest"
+    ]
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/edge.ts"
+  ]
 }

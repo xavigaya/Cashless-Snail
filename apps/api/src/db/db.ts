@@ -1,53 +1,48 @@
-import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import { APP_CONFIG, type AppConfig } from '../config';
+/**
+ * Connexió a PostgreSQL amb postgres-js + Drizzle.
+ * Funciona igual a Node (servidor local) i a Deno (Edge Function de Supabase).
+ */
+import postgres from 'postgres';
+import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from './schema';
 
-export type Db = NodePgDatabase<typeof schema>;
+export type Db = PostgresJsDatabase<typeof schema>;
 /** Transacció de Drizzle: té la mateixa interfície que Db. */
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /** Qualsevol objecte amb què es poden fer consultes: la connexió o una transacció. */
 export type Queryable = Db | Tx;
+export type SqlClient = postgres.Sql;
 
-export const PG_POOL = Symbol('PG_POOL');
-export const DB = Symbol('DB');
-
-export function createPool(databaseUrl: string): Pool {
-  return new Pool({ connectionString: databaseUrl, max: 20 });
+export interface SqlOptions {
+  /** Connexions màximes. A Supabase, poques: cada instància de la funció obre les seves. */
+  max?: number;
 }
 
-export function createDb(pool: Pool): Db {
-  return drizzle(pool, { schema });
+export function createSql(databaseUrl: string, options: SqlOptions = {}): SqlClient {
+  return postgres(databaseUrl, {
+    max: options.max ?? 10,
+    // El pooler de Supabase en mode transacció no admet sentències preparades.
+    prepare: false,
+    idle_timeout: 20,
+    onnotice: () => undefined,
+    connection: { application_name: 'cashless-snail' },
+  });
 }
 
-/** Codi d'error de PostgreSQL per a violació d'unicitat. */
+export function createDb(sql: SqlClient): Db {
+  return drizzle(sql, { schema });
+}
+
+/** Codi d'error de PostgreSQL per a violació d'unicitat (també dins d'errors embolcallats per Drizzle). */
 export function isUniqueViolation(error: unknown, constraint?: string): boolean {
-  const e = (error as { cause?: unknown })?.cause ?? error;
-  const pgError = e as { code?: string; constraint?: string };
-  return pgError?.code === '23505' && (constraint === undefined || pgError.constraint === constraint);
-}
-
-@Global()
-@Module({
-  providers: [
-    {
-      provide: PG_POOL,
-      inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) => createPool(config.databaseUrl),
-    },
-    {
-      provide: DB,
-      inject: [PG_POOL],
-      useFactory: (pool: Pool) => createDb(pool),
-    },
-  ],
-  exports: [DB, PG_POOL],
-})
-export class DatabaseModule implements OnModuleDestroy {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
-
-  async onModuleDestroy(): Promise<void> {
-    await this.pool.end();
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 5; depth++) {
+    const e = current as { code?: string; constraint_name?: string; constraint?: string; cause?: unknown };
+    if (e.code === '23505') {
+      const name = e.constraint_name ?? e.constraint;
+      return constraint === undefined || name === constraint;
+    }
+    current = e.cause;
   }
+  return false;
 }

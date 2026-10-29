@@ -13,3 +13,8 @@ apps/tpv/.expo/
 apps/tpv/android/
 apps/tpv/ios/
 apps/tpv/web-build/
+
+# Supabase
+supabase/functions/api/api.js
+supabase/.temp/
+supabase/.branches/

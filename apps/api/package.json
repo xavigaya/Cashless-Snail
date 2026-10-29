@@ -4,39 +4,33 @@
   "private": true,
   "description": "Servidor central: lògica de negoci, permisos i llibre de moviments",
   "scripts": {
-    "build": "nest build",
-    "dev": "nest start --watch",
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch -r ts-node/register src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "node -r ts-node/register src/db/migrate.ts",
     "db:seed": "node -r ts-node/register src/db/seed.ts",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "build:edge": "node scripts/build-edge.mjs"
   },
   "dependencies": {
     "@cashless/shared": "workspace:*",
-    "@nestjs/common": "^11.0.0",
-    "@nestjs/core": "^11.0.0",
-    "@nestjs/jwt": "^11.0.0",
-    "@nestjs/platform-express": "^11.0.0",
+    "@hono/node-server": "^2.1.5",
     "drizzle-orm": "^0.44.0",
-    "pg": "^8.13.0",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1",
+    "hono": "^4.13.14",
+    "postgres": "^3.4.9",
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.0",
-    "@nestjs/testing": "^11.0.0",
-    "@types/express": "^5.0.0",
     "@types/jest": "^29.5.0",
     "@types/node": "^22.0.0",
-    "@types/pg": "^8.11.0",
     "@types/supertest": "^6.0.0",
     "jest": "^29.7.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "esbuild": "^0.28.0"
   },
   "jest": {
     "rootDir": ".",

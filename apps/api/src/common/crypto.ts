@@ -1,4 +1,5 @@
 /** Utilitats criptogràfiques basades només en node:crypto. */
+import { Buffer } from 'node:buffer';
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto';
 import { codeFromRandomBytes } from '@cashless/shared';
 

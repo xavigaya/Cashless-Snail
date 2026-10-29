@@ -1,14 +1,13 @@
-import type { INestApplication } from '@nestjs/common';
-import { Pool } from 'pg';
 import type { Balance, EventTotals, OperationResult, PairResult, Terminal } from '@cashless/shared';
-import { Client, createPlatformAdmin, createTestApp, newId, resetDatabase, TEST_DATABASE_URL } from './helpers';
+import type { RunningServer } from '../src/main';
+import { Client, createPlatformAdmin, createTestServer, newId, resetDatabase, testSql } from './helpers';
 
 /**
  * Recorregut complet de la fase 0: configuració des del backoffice,
  * vinculació de terminals, activació, recàrrega, venda, anul·lació i resum.
  */
 describe('Cashless · fase 0', () => {
-  let app: INestApplication;
+  let server: RunningServer;
   let api: Client;
   let admin: Client;
   let eventId: string;
@@ -38,8 +37,8 @@ describe('Cashless · fase 0', () => {
   beforeAll(async () => {
     await resetDatabase();
     await createPlatformAdmin('admin@test.cat', 'contrasenya-de-proves');
-    app = await createTestApp();
-    api = new Client(app);
+    server = await createTestServer();
+    api = new Client(server.url);
 
     const login = await api.post('/auth/login', { email: 'admin@test.cat', password: 'contrasenya-de-proves' }).expect(200);
     admin = api.with({ Authorization: `Bearer ${login.body.token}` });
@@ -90,7 +89,7 @@ describe('Cashless · fase 0', () => {
   });
 
   afterAll(async () => {
-    await app?.close();
+    await server?.close();
   });
 
   describe('terminals i operadors', () => {
@@ -285,9 +284,9 @@ describe('Cashless · fase 0', () => {
     });
 
     it('els saldos coincideixen amb la suma dels moviments', async () => {
-      const pool = new Pool({ connectionString: TEST_DATABASE_URL });
+      const sql = testSql();
       try {
-        const { rows } = await pool.query(`
+        const rows = await sql.unsafe(`
           SELECT w.id
           FROM wallets w
           LEFT JOIN movements m ON m.wallet_id = w.id
@@ -295,10 +294,10 @@ describe('Cashless · fase 0', () => {
           HAVING w.paid_cents <> coalesce(sum(m.paid_delta_cents), 0)
               OR w.promo_cents <> coalesce(sum(m.promo_delta_cents), 0)
               OR w.deposit_cents <> coalesce(sum(m.deposit_delta_cents), 0)`);
-        expect(rows).toEqual([]);
-        await expect(pool.query('UPDATE movements SET amount_cents = 0')).rejects.toThrow(/immutables/);
+        expect([...rows]).toEqual([]);
+        await expect(sql.unsafe('UPDATE movements SET amount_cents = 0')).rejects.toThrow(/immutables/);
       } finally {
-        await pool.end();
+        await sql.end({ timeout: 5 });
       }
     });
 
@@ -368,6 +367,33 @@ describe('Cashless · fase 0', () => {
       await boxOffice2.post('/tpv/topups', { id: newId(), wristband: { uid: OTHER_UID }, amountCents: 1000, method: 'cash' }).expect(201);
       const res = await cashier.post('/tpv/sales', { id: newId(), wristband: { uid: OTHER_UID }, lines: [{ productId: ids.water, quantity: 1 }] }).expect(422);
       expect(res.body.code).toBe('WRISTBAND_NOT_ACTIVATED');
+    });
+  });
+
+  // Al final: el límit d'intents afecta les rutes d'entrada durant un minut.
+  describe('HTTP', () => {
+    it('una ruta inexistent retorna un error JSON', async () => {
+      const res = await api.get('/no-existeix').expect(404);
+      expect(res.body).toMatchObject({ statusCode: 404, code: 'NOT_FOUND' });
+    });
+
+    it('un identificador mal format és un error de validació', async () => {
+      const res = await admin.get('/events/no-es-un-uuid').expect(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('limita els intents de vinculació des d’una mateixa adreça', async () => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await api.post('/tpv/pair', { pairingCode: 'ZZZZZZZZ' });
+        statuses.push(res.status);
+        if (res.status === 429) {
+          expect(res.body.code).toBe('TOO_MANY_REQUESTS');
+          break;
+        }
+      }
+      expect(statuses.at(-1)).toBe(429);
+      expect(statuses.slice(0, -1).every((s) => s === 401)).toBe(true);
     });
   });
 });

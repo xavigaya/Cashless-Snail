@@ -7,7 +7,6 @@
  * - L'identificador del moviment el genera el client: si una petició es repeteix
  *   (per exemple, perquè es va perdre la resposta), es retorna el resultat original sense duplicar-la.
  */
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   mergeLines,
@@ -26,7 +25,7 @@ import {
 } from '@cashless/shared';
 import { deriveUuid, generateWristbandCode, sha256, stableStringify } from '../common/crypto';
 import { conflict, DomainError, forbidden, notFound, unprocessable } from '../common/errors';
-import { DB, isUniqueViolation, type Db, type Queryable, type Tx } from '../db/db';
+import { isUniqueViolation, type Db, type Queryable, type Tx } from '../db/db';
 import {
   movementLines,
   movements,
@@ -72,9 +71,8 @@ interface NewMovement {
   clientCreatedAt?: Date;
 }
 
-@Injectable()
 export class LedgerService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(private readonly db: Db) {}
 
   // ---------------------------------------------------------------
   // Consultes
@@ -88,7 +86,7 @@ export class LedgerService {
 
   async balance(event: { id: string; organizationId: string }, ref: WristbandRef): Promise<Balance> {
     const wristband = await this.findWristband(this.db, ref);
-    if (!wristband) throw new DomainError('WRISTBAND_NOT_FOUND', 'Polsera no registrada', HttpStatus.NOT_FOUND);
+    if (!wristband) throw new DomainError('WRISTBAND_NOT_FOUND', 'Polsera no registrada', 404);
     return loadBalance(this.db, wristband, event);
   }
 
@@ -405,7 +403,7 @@ export class LedgerService {
 
   private async requireActiveWristband(tx: Tx, ref: WristbandRef): Promise<WristbandRow> {
     const wristband = await this.findWristband(tx, ref);
-    if (!wristband) throw new DomainError('WRISTBAND_NOT_FOUND', 'Polsera no registrada: cal activar-la a la taquilla', HttpStatus.NOT_FOUND);
+    if (!wristband) throw new DomainError('WRISTBAND_NOT_FOUND', 'Polsera no registrada: cal activar-la a la taquilla', 404);
     if (wristband.status !== 'active') throw unprocessable('WRISTBAND_BLOCKED', 'Aquesta polsera està bloquejada');
     return wristband;
   }

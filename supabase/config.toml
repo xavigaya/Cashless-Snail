@@ -1,0 +1,11 @@
+# Configuració mínima de Supabase per a aquest projecte.
+# Només s'hi defineix l'Edge Function "api"; la resta (base de dades, migracions)
+# es gestiona amb les migracions pròpies d'apps/api/migrations.
+project_id = "cashless-snail"
+
+[functions.api]
+enabled = true
+# L'API fa la seva pròpia autenticació (administradors, terminals i operadors):
+# Supabase no ha d'exigir els seus JWT.
+verify_jwt = false
+entrypoint = "./functions/api/index.ts"

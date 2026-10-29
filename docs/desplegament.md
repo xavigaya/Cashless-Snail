@@ -1,4 +1,6 @@
-# Desplegament 100% online
+# Desplegament 100% online amb Render
+
+> Hi ha una alternativa gratuïta amb Supabase i GitHub Pages: vegeu [supabase.md](supabase.md).
 
 Amb aquesta configuració no cal cap ordinador ni servidor propi:
 

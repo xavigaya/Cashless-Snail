@@ -1,0 +1,56 @@
+# Publica el backoffice a GitHub Pages, connectat a l'API de Supabase.
+# Cal activar-ho una vegada: Settings → Pages → Source: "GitHub Actions". Guia: docs/supabase.md
+name: Backoffice a GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/backoffice/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/backoffice-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: vars.SUPABASE_PROJECT_REF != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter "@cashless/backoffice..."
+      - name: Compila el backoffice
+        run: pnpm --filter @cashless/backoffice build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_API_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/api
+      # GitHub Pages respon amb 404.html les rutes que no són fitxers: així funcionen les rutes internes.
+      - run: cp apps/backoffice/dist/index.html apps/backoffice/dist/404.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/backoffice/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

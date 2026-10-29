@@ -9,7 +9,8 @@ Es paga amb polsera NFC o QR; el saldo, en euros, es guarda al servidor.
 
 ```
 apps/
-  api/          Servidor central (NestJS + PostgreSQL): llibre de moviments, permisos, API
+  api/          Servidor central (Hono + PostgreSQL): llibre de moviments, permisos, API.
+                Funciona a Node (versió local) i com a Edge Function de Supabase (versió online)
   backoffice/   Web de configuració (React + Vite)
   tpv/          App de terminal per a Android i iPhone (Expo / React Native) amb NFC i QR
 packages/
@@ -28,11 +29,15 @@ Principis del disseny:
 - **Saldo promocional i saldo pagat separats:** el promocional (regals, voluntaris) es gasta primer i no es retorna.
 - **Activació per esdeveniment:** per recarregar o comprar, la polsera s’ha d’haver activat (preu de polsera pagat) en aquell esdeveniment, encara que ja tingui saldo d’un altre esdeveniment de la mateixa entitat.
 
-## Desplegament al núvol
+## On es pot executar
 
-El sistema es pot fer funcionar 100% online, sense cap equip propi: servidor, backoffice i base de dades a [Render](https://render.com) (Frankfurt, UE) i l’app TPV compilada al núvol d’Expo. Cost orientatiu: uns 13 $/mes. Guia pas a pas: [docs/desplegament.md](docs/desplegament.md).
+Hi ha tres maneres de fer-lo funcionar, amb el mateix codi:
 
-Per provar-ho tot al teu ordinador, vegeu [docs/com-provar.md](docs/com-provar.md).
+| Opció | Base de dades i API | Backoffice | Cost | Guia |
+| --- | --- | --- | --- | --- |
+| **Local** | Un ordinador a l’esdeveniment | El mateix ordinador | 0 € | [docs/com-provar.md](docs/com-provar.md) |
+| **Supabase** | Supabase (Edge Function + PostgreSQL), Frankfurt | GitHub Pages | 0 € (pla gratuït, amb limitacions) | [docs/supabase.md](docs/supabase.md) |
+| **Render** | Render (servei web + PostgreSQL), Frankfurt | El mateix servei | ~13 $/mes | [docs/desplegament.md](docs/desplegament.md) |
 
 ## Requisits
 
@@ -96,7 +101,7 @@ Fase 0 — prototip:
 | --- | --- |
 | Esquema de base de dades i restriccions | Provat contra PostgreSQL 16 |
 | Lògica compartida (preus, saldos, codis de polsera) | Provada |
-| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | 24 proves de punta a punta en verd, incloses concurrència i duplicats |
+| Servidor: llibre de moviments, vendes, recàrregues, activació, anul·lacions | 27 proves de punta a punta en verd, incloses concurrència i duplicats, tant a Node com a l’Edge Function de Supabase (Deno) |
 | Servidor: backoffice (entitats, esdeveniments, catàleg, operadors, terminals, resum) | Provat amb les mateixes proves i manualment |
 | Backoffice web | Provat en navegador (ordinador i mòbil) |
 | App TPV (venda, taquilla, NFC, QR) | Compila i s’empaqueta per a Android; **falta provar-la en dispositius reals** |
@@ -119,6 +124,6 @@ Fases següents (vegeu el document d’especificacions): esdeveniment real (mult
 | Polseres | `GET /events/:id/wristbands/lookup`, `PATCH /events/:id/wristbands/:wid/status` |
 | Terminal | `POST /tpv/pair`, `GET /tpv/context`, `POST /tpv/login`, `GET /tpv/catalog`, `GET /tpv/balance`, `POST /tpv/sales`, `POST /tpv/topups`, `POST /tpv/activations`, `POST /tpv/voids`, `GET /tpv/recent` |
 
-En el desplegament al núvol, totes aquestes rutes van precedides de `/api` (per exemple, `/api/tpv/sales`).
+Amb Render i amb el servidor local servint el backoffice, totes aquestes rutes van precedides de `/api` (per exemple, `/api/tpv/sales`). A Supabase, de `/functions/v1/api` (per exemple, `https://<projecte>.supabase.co/functions/v1/api/tpv/sales`).
 
 Els terminals s’identifiquen amb la capçalera `X-Terminal-Token`; els operadors i els administradors, amb `Authorization: Bearer <token>`.

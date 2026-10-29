@@ -3,31 +3,38 @@
  * Necessiten una base de dades PostgreSQL buida: TEST_DATABASE_URL.
  * ATENCIÓ: les proves esborren totes les dades d'aquesta base de dades.
  */
-import 'reflect-metadata';
-import { type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import type { NestExpressApplication } from '@nestjs/platform-express';
-import { Pool } from 'pg';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/main';
+import { startServer, type RunningServer } from '../src/main';
 import { runMigrations } from '../src/db/migrate';
+import { createSql, type SqlClient } from '../src/db/db';
 import type { AppConfig } from '../src/config';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:5433/cashless_test';
 
+/** Connexió directa a la base de dades de proves (per preparar dades o fer comprovacions). */
+export function testSql(): SqlClient {
+  return createSql(TEST_DATABASE_URL, { max: 2 });
+}
+
 export async function resetDatabase(): Promise<void> {
-  const pool = new Pool({ connectionString: TEST_DATABASE_URL });
+  const sql = testSql();
   try {
-    await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await runMigrations(pool, () => undefined);
+    await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await runMigrations(sql, () => undefined);
   } finally {
-    await pool.end();
+    await sql.end({ timeout: 5 });
   }
 }
 
-export async function createTestApp(): Promise<INestApplication> {
+/**
+ * Arrenca el servidor real (el mateix que en producció) en un port lliure.
+ * Si TEST_API_URL està definida, fa les proves contra aquella API ja en marxa
+ * (per exemple, l'Edge Function executada amb Deno), que ha de fer servir la mateixa base de dades.
+ */
+export async function createTestServer(): Promise<RunningServer> {
+  const external = process.env.TEST_API_URL;
+  if (external) return { server: undefined as never, url: external.replace(/\/+$/, ''), close: async () => undefined };
   const config: AppConfig = {
     databaseUrl: TEST_DATABASE_URL,
     jwtSecret: 'clau-de-proves-prou-llarga-per-signar-tokens',
@@ -35,25 +42,19 @@ export async function createTestApp(): Promise<INestApplication> {
     corsOrigins: [],
     publicApiUrl: 'http://localhost:3000',
   };
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(config)] }).compile();
-  const app = configureApp(moduleRef.createNestApplication<NestExpressApplication>({ logger: false }), config);
-  // Escoltar en un port real evita que supertest obri un servidor nou per a cada petició.
-  await app.listen(0, '127.0.0.1');
-  return app;
+  return startServer(config, createSql(TEST_DATABASE_URL, { max: 20 }), 0);
 }
 
 /** Crea l'administrador de plataforma directament a la base de dades. */
 export async function createPlatformAdmin(email: string, password: string): Promise<void> {
   const { hashSecret } = await import('../src/common/crypto');
-  const pool = new Pool({ connectionString: TEST_DATABASE_URL });
+  const sql = testSql();
   try {
-    const { rows } = await pool.query<{ id: string }>(
-      'INSERT INTO admin_users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id',
-      [email, 'Admin', await hashSecret(password)],
-    );
-    await pool.query("INSERT INTO role_assignments (user_id, role) VALUES ($1, 'platform_admin')", [rows[0]!.id]);
+    const [user] = await sql<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, password_hash) VALUES (${email}, 'Admin', ${await hashSecret(password)}) RETURNING id`;
+    await sql`INSERT INTO role_assignments (user_id, role) VALUES (${user!.id}, 'platform_admin')`;
   } finally {
-    await pool.end();
+    await sql.end({ timeout: 5 });
   }
 }
 
@@ -62,23 +63,23 @@ export const newId = () => randomUUID();
 /** Client HTTP amb les capçaleres d'autenticació preparades. */
 export class Client {
   constructor(
-    private readonly app: INestApplication,
+    private readonly baseUrl: string,
     private readonly headers: Record<string, string> = {},
   ) {}
 
   with(headers: Record<string, string>): Client {
-    return new Client(this.app, { ...this.headers, ...headers });
+    return new Client(this.baseUrl, { ...this.headers, ...headers });
   }
 
   get(path: string) {
-    return request(this.app.getHttpServer()).get(path).set(this.headers);
+    return request(this.baseUrl).get(path).set(this.headers);
   }
 
   post(path: string, body: object = {}) {
-    return request(this.app.getHttpServer()).post(path).set(this.headers).send(body);
+    return request(this.baseUrl).post(path).set(this.headers).send(body);
   }
 
   patch(path: string, body: object = {}) {
-    return request(this.app.getHttpServer()).patch(path).set(this.headers).send(body);
+    return request(this.baseUrl).patch(path).set(this.headers).send(body);
   }
 }

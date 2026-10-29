@@ -1,7 +1,5 @@
-import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
-import type { Request } from 'express';
 import type { OperatorRole, PosKind, RoleAssignment } from '@cashless/shared';
-import { forbidden } from '../common/errors';
+import { DomainError, forbidden } from '../common/errors';
 
 /** Usuari del backoffice autenticat. */
 export interface AdminPrincipal {
@@ -30,28 +28,17 @@ export interface OperatorPrincipal {
   eventId: string;
 }
 
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      admin?: AdminPrincipal;
-      terminal?: TerminalPrincipal;
-      operator?: OperatorPrincipal;
-    }
-  }
+export interface AdminTokenPayload {
+  sub: string;
+  kind: 'admin';
 }
 
-function fromRequest<K extends 'admin' | 'terminal' | 'operator'>(key: K) {
-  return createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
-    const value = ctx.switchToHttp().getRequest<Request>()[key];
-    if (!value) throw new Error(`Falta ${key} a la petició: revisa els guards del controlador`);
-    return value;
-  });
+export interface OperatorTokenPayload {
+  sub: string;
+  kind: 'operator';
+  terminalId: string;
+  eventId: string;
 }
-
-export const CurrentAdmin = fromRequest('admin');
-export const CurrentTerminal = fromRequest('terminal');
-export const CurrentOperator = fromRequest('operator');
 
 // ---------- Permisos del backoffice ----------
 
@@ -87,3 +74,9 @@ export function assertCanManageEvent(admin: AdminPrincipal, event: { id: string;
 export const SALE_ROLES: readonly OperatorRole[] = ['cashier', 'waiter', 'bar_lead'];
 export const BOX_OFFICE_ROLES: readonly OperatorRole[] = ['box_office'];
 export const VOID_ROLES: readonly OperatorRole[] = ['bar_lead'];
+
+export function assertOperatorRole(role: OperatorRole, allowed: readonly OperatorRole[]): void {
+  if (!allowed.includes(role)) {
+    throw new DomainError('FORBIDDEN_FOR_ROLE', 'El teu rol no permet fer aquesta operació', 403);
+  }
+}

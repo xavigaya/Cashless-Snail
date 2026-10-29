@@ -1,4 +1,5 @@
 /** Lectura de moviments i saldos en el format de l'API. */
+import { Buffer } from 'node:buffer';
 import { and, desc, eq, inArray, lt, or, type SQL } from 'drizzle-orm';
 import type { Balance, Movement, Page } from '@cashless/shared';
 import type { Queryable } from '../db/db';

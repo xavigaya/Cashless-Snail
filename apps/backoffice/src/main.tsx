@@ -56,7 +56,10 @@ const router = createBrowserRouter([
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
-]);
+], {
+  // Quan es publica en una subcarpeta (p. ex. GitHub Pages: /Cashless-Snail/), les rutes hi pengen.
+  basename: import.meta.env.BASE_URL.replace(/\/+$/, '') || '/',
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

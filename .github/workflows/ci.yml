@@ -1,4 +1,5 @@
-# Comprova cada canvi: tipus de tots els paquets i proves contra PostgreSQL.
+# Comprova cada canvi: tipus de tots els paquets i proves contra PostgreSQL,
+# tant amb el servidor local (Node) com amb l'Edge Function de Supabase (Deno).
 name: Proves
 
 on:
@@ -33,6 +34,59 @@ jobs:
       - run: pnpm build:shared
       - run: pnpm typecheck
       - run: pnpm --filter @cashless/shared test
-      - run: pnpm test
+      - name: Proves amb el servidor local (Node)
+        run: pnpm test
         env:
           TEST_DATABASE_URL: postgres://cashless:cashless@localhost:5432/cashless_test
+
+  edge-function:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cashless
+          POSTGRES_PASSWORD: cashless
+          POSTGRES_DB: cashless_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cashless"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://cashless:cashless@localhost:5432/cashless_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: pnpm install --frozen-lockfile --filter "@cashless/api..."
+      - run: pnpm build:shared
+      - run: pnpm --filter @cashless/api build:edge
+      - name: Arrenca l'Edge Function amb Deno (fora del repositori, com a Supabase)
+        run: |
+          mkdir -p "$RUNNER_TEMP/edge"
+          cp supabase/functions/api/index.ts supabase/functions/api/api.js "$RUNNER_TEMP/edge/"
+          cd "$RUNNER_TEMP/edge"
+          SUPABASE_DB_URL="$TEST_DATABASE_URL" SUPABASE_URL=http://127.0.0.1:8000 \
+          CASHLESS_JWT_SECRET=clau-de-proves-de-la-edge-function-0123456789 \
+            nohup deno run --allow-net --allow-env --allow-read --allow-sys index.ts > edge.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://127.0.0.1:8000/api/meta && exit 0
+            sleep 2
+          done
+          cat edge.log
+          exit 1
+      - name: Proves amb l'Edge Function (Deno)
+        run: pnpm test
+        env:
+          TEST_API_URL: http://127.0.0.1:8000/api
+      - name: Registre de l'Edge Function
+        if: failure()
+        run: cat "$RUNNER_TEMP/edge/edge.log"

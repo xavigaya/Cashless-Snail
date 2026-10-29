@@ -1,0 +1,93 @@
+# Desplega l'API a Supabase: migracions, primer administrador i Edge Function "api".
+# S'executa sol en cada canvi a main que toqui el servidor, o a mà des de la pestanya Actions.
+#
+# Configuració necessària (Settings → Secrets and variables → Actions). Guia: docs/supabase.md
+#   Variable  SUPABASE_PROJECT_REF       identificador del projecte (p. ex. abcdefghijklmnopqrst)
+#   Secret    SUPABASE_ACCESS_TOKEN      token d'accés personal de Supabase
+#   Secret    SUPABASE_DB_URL            cadena de connexió "Session pooler" (amb la contrasenya)
+#   Secret    CASHLESS_JWT_SECRET        clau aleatòria d'almenys 32 caràcters
+#   Secret    BOOTSTRAP_ADMIN_EMAIL      correu del primer administrador
+#   Secret    BOOTSTRAP_ADMIN_PASSWORD   contrasenya inicial (mínim 12 caràcters)
+#   Variable  CORS_ORIGINS               (opcional) per defecte https://<usuari>.github.io
+name: Desplega a Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/shared/**"
+      - "supabase/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/supabase.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-deploy
+  cancel-in-progress: false
+
+jobs:
+  desplega:
+    # No fa res fins que s'ha configurat el projecte de Supabase.
+    if: vars.SUPABASE_PROJECT_REF != ''
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      CASHLESS_JWT_SECRET: ${{ secrets.CASHLESS_JWT_SECRET }}
+      BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
+      BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS || format('https://{0}.github.io', github.repository_owner) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprova la configuració
+        run: |
+          missing=""
+          for v in SUPABASE_ACCESS_TOKEN DATABASE_URL CASHLESS_JWT_SECRET; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Falten secrets del repositori:$missing (DATABASE_URL és el secret SUPABASE_DB_URL). Vegeu docs/supabase.md"
+            exit 1
+          fi
+          if [ ${#CASHLESS_JWT_SECRET} -lt 32 ]; then
+            echo "::error::CASHLESS_JWT_SECRET ha de tenir almenys 32 caràcters"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter "@cashless/api..."
+      - run: pnpm --filter @cashless/shared build
+      - run: pnpm --filter @cashless/api build
+
+      - name: Aplica les migracions
+        run: node apps/api/dist/db/migrate.js
+
+      - name: Crea el primer administrador (només si no n'hi ha cap)
+        run: node apps/api/dist/db/bootstrap.js
+
+      - name: Empaqueta l'Edge Function
+        run: pnpm --filter @cashless/api build:edge
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.0
+
+      - name: Secrets de la funció
+        run: supabase secrets set --project-ref "$PROJECT_REF" CASHLESS_JWT_SECRET="$CASHLESS_JWT_SECRET" CORS_ORIGINS="$CORS_ORIGINS"
+
+      - name: Desplega la funció
+        run: supabase functions deploy api --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+
+      - name: Comprova que respon
+        run: |
+          url="https://$PROJECT_REF.supabase.co/functions/v1/api/health"
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 --retry-all-errors "$url"
+          echo
+          echo "API en marxa a https://$PROJECT_REF.supabase.co/functions/v1/api"
