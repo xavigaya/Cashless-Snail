@@ -21,6 +21,8 @@ const KEYS = {
 
 export interface QueuedSale {
   id: string;
+  /** Terminal que la va cobrar: només es pot enviar amb el token d'aquest terminal. */
+  terminalId: string;
   wristband: WristbandRef;
   operatorId: string;
   lines: { productId: string; quantity: number; unitPriceCents: number }[];
@@ -39,7 +41,7 @@ export interface QueueState {
   syncing: boolean;
 }
 
-const wristbandKey = (ref: WristbandRef) => ref.uid ?? `code:${ref.code}`;
+export const wristbandKey = (ref: WristbandRef) => ref.uid ?? `code:${ref.code}`;
 
 async function readList<T>(key: string): Promise<T[]> {
   try {
@@ -54,6 +56,8 @@ class OfflineQueue {
   private state: QueueState = { pending: [], rejected: [], syncing: false };
   private loaded: Promise<void> | null = null;
   private listeners = new Set<(s: QueueState) => void>();
+  /** Els canvis a la cua es fan d'un en un: cada canvi parteix de l'estat que ha deixat l'anterior. */
+  private lock: Promise<void> = Promise.resolve();
 
   load(): Promise<void> {
     this.loaded ??= (async () => {
@@ -79,30 +83,39 @@ class OfflineQueue {
     return this.state.pending.filter((s) => wristbandKey(s.wristband) === key).reduce((sum, s) => sum + s.totalCents, 0);
   }
 
-  async add(sale: QueuedSale): Promise<void> {
-    await this.load();
-    if (this.state.pending.some((s) => s.id === sale.id)) return;
-    const pending = [...this.state.pending, sale];
-    // Primer es desa al dispositiu: si l'app es tanca, la venda no es perd.
-    await AsyncStorage.setItem(KEYS.queue, JSON.stringify(pending));
-    this.set({ pending });
+  add(sale: QueuedSale): Promise<void> {
+    return this.mutate(async () => {
+      if (this.state.pending.some((s) => s.id === sale.id)) return;
+      const pending = [...this.state.pending, sale];
+      // Primer es desa al dispositiu: si l'app es tanca, la venda no es perd.
+      await AsyncStorage.setItem(KEYS.queue, JSON.stringify(pending));
+      this.set({ pending });
+    });
   }
 
-  async clearRejected(): Promise<void> {
-    await AsyncStorage.removeItem(KEYS.rejected);
-    this.set({ rejected: [] });
+  clearRejected(): Promise<void> {
+    return this.mutate(async () => {
+      await AsyncStorage.removeItem(KEYS.rejected);
+      this.set({ rejected: [] });
+    });
   }
 
   /**
-   * Envia les vendes pendents en ordre. S'atura al primer error de xarxa o del servidor (es tornarà a provar);
-   * les que el servidor rebutja per dades incorrectes es guarden apart perquè el cap de barra les vegi.
+   * Envia les vendes pendents en ordre.
+   * - Sense xarxa o terminal no autoritzat: s'atura i es tornarà a provar.
+   * - Error del servidor: aquella venda es reintentarà, però es continua amb les altres.
+   * - Rebutjada (dades incorrectes): es guarda apart perquè el cap de barra la vegi; el servidor també la desa a l'auditoria.
    */
-  async sync(api: TpvApi): Promise<void> {
+  async sync(api: TpvApi, terminalId: string): Promise<void> {
     await this.load();
     if (this.state.syncing || this.state.pending.length === 0) return;
     this.set({ syncing: true });
     try {
       for (const sale of [...this.state.pending]) {
+        if (sale.terminalId !== terminalId) {
+          await this.reject({ ...sale, code: 'FORBIDDEN', message: 'Venda feta amb aquest mòbil quan estava vinculat a un altre terminal' });
+          continue;
+        }
         try {
           await api.offlineSale({
             id: sale.id,
@@ -114,8 +127,8 @@ class OfflineQueue {
           await this.remove(sale.id);
         } catch (error) {
           const status = error instanceof ApiRequestError ? error.error.statusCode : 0;
-          // Xarxa, servidor o terminal no autoritzat: es reintentarà més tard.
-          if (status === 0 || status >= 500 || status === 401 || status === 403 || status === 429) return;
+          if (status === 0 || status === 401) return;
+          if (status >= 500 || status === 429) continue;
           const e = (error as ApiRequestError).error;
           await this.reject({ ...sale, code: e.code, message: e.message });
         }
@@ -125,17 +138,30 @@ class OfflineQueue {
     }
   }
 
-  private async remove(id: string): Promise<void> {
-    const pending = this.state.pending.filter((s) => s.id !== id);
-    await AsyncStorage.setItem(KEYS.queue, JSON.stringify(pending));
-    this.set({ pending });
+  private remove(id: string): Promise<void> {
+    return this.mutate(async () => {
+      const pending = this.state.pending.filter((s) => s.id !== id);
+      await AsyncStorage.setItem(KEYS.queue, JSON.stringify(pending));
+      this.set({ pending });
+    });
   }
 
   private async reject(sale: RejectedSale): Promise<void> {
-    const rejected = [...this.state.rejected, sale];
-    await AsyncStorage.setItem(KEYS.rejected, JSON.stringify(rejected));
+    await this.mutate(async () => {
+      const rejected = [...this.state.rejected, sale];
+      await AsyncStorage.setItem(KEYS.rejected, JSON.stringify(rejected));
+      this.set({ rejected });
+    });
     await this.remove(sale.id);
-    this.set({ rejected });
+  }
+
+  private mutate(change: () => Promise<void>): Promise<void> {
+    const run = this.lock.then(async () => {
+      await this.load();
+      await change();
+    });
+    this.lock = run.catch(() => undefined);
+    return run;
   }
 
   private set(patch: Partial<QueueState>): void {

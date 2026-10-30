@@ -77,6 +77,8 @@ interface NewMovement {
   clientCreatedAt?: Date;
   offline?: boolean;
   offlineIssues?: ErrorCode[];
+  /** Per defecte, el torn del context. */
+  shiftId?: string | null;
 }
 
 export class LedgerService {
@@ -181,7 +183,7 @@ export class LedgerService {
    * el saldo pot quedar negatiu (deute) i s'anoten les incidències perquè l'organització les revisi.
    * Només es rebutja si els productes no són d'aquest punt de venda (dades incorrectes).
    */
-  async offlineSale(ctx: OperationContext, input: OfflineSaleInput): Promise<OperationResult> {
+  async offlineSale(ctx: OperationContext, input: OfflineSaleInput, extraIssues: ErrorCode[] = []): Promise<OperationResult> {
     const lines = mergeLines(input.lines).sort((a, b) => (a.productId < b.productId ? -1 : 1));
     // El mateix hash que una venda amb connexió: si la venda sí que va arribar al servidor
     // (però el terminal no en va rebre la resposta), la sincronització en retorna el resultat.
@@ -194,7 +196,7 @@ export class LedgerService {
 
     return this.idempotent(input.id, requestHash, (tx) => this.replaySingle(tx, input.id, ctx), async (tx) => {
       if (!ctx.vendorId) throw forbidden('Aquest punt de venda no pot vendre productes');
-      const issues = new Set<ErrorCode>();
+      const issues = new Set<ErrorCode>(extraIssues);
       if (ctx.event.status !== 'active') issues.add('EVENT_NOT_ACTIVE');
 
       const productRows = await tx
@@ -207,23 +209,29 @@ export class LedgerService {
               lines.map((l) => l.productId),
             ),
             eq(products.eventId, ctx.event.id),
-            eq(products.vendorId, ctx.vendorId),
           ),
         );
       const productById = new Map(productRows.map((p) => [p.id, p]));
       const missing = lines.filter((l) => !productById.has(l.productId)).map((l) => l.productId);
       if (missing.length > 0) {
-        throw unprocessable('PRODUCT_UNAVAILABLE', 'Algun producte no és d’aquest punt de venda', { productIds: missing });
+        throw unprocessable('PRODUCT_UNAVAILABLE', 'Algun producte no és d’aquest esdeveniment', { productIds: missing });
       }
       const priced = priceLines(
         lines.map((l) => {
           const p = productById.get(l.productId)!;
-          if (!p.active) issues.add('PRODUCT_UNAVAILABLE');
+          // Un producte desactivat o passat a un altre venedor mentre el terminal no tenia xarxa: es registra igualment.
+          if (!p.active || p.vendorId !== ctx.vendorId) issues.add('PRODUCT_UNAVAILABLE');
           if (p.priceCents !== l.unitPriceCents) issues.add('PRICE_CHANGED');
           return { productId: p.id, name: p.name, quantity: l.quantity, unitPriceCents: l.unitPriceCents, vatRateBps: p.vatRateBps };
         }),
       );
-      if (priced.totalCents > ctx.event.offlineSaleLimitCents) issues.add('OVER_OFFLINE_LIMIT');
+      // Per sobre del límit no s'accepta: el terminal ja ho impedeix, així que només ho faria un terminal defectuós o manipulat.
+      if (priced.totalCents > ctx.event.offlineSaleLimitCents) {
+        throw unprocessable('OVER_OFFLINE_LIMIT', 'La venda supera el límit sense connexió de l’esdeveniment', {
+          totalCents: priced.totalCents,
+          limitCents: ctx.event.offlineSaleLimitCents,
+        });
+      }
 
       if (!(await this.findWristband(tx, input.wristband))) issues.add('WRISTBAND_NOT_FOUND');
       const wristband = await this.findOrCreateWristband(tx, input.wristband);
@@ -397,10 +405,19 @@ export class LedgerService {
         throw unprocessable('INSUFFICIENT_BALANCE', 'No hi ha prou saldo per anul·lar aquest moviment: ja s’ha gastat');
       }
 
+      // L'anul·lació d'un cobrament de taquilla compta en el mateix torn de caixa, si encara és obert
+      // (els diners surten d'aquell calaix). Si el torn ja és tancat, queda fora dels torns.
+      let shiftId: string | null = null;
+      if (target.shiftId) {
+        const [shift] = await tx.select({ closedAt: cashShifts.closedAt }).from(cashShifts).where(eq(cashShifts.id, target.shiftId)).for('share');
+        if (shift && !shift.closedAt) shiftId = target.shiftId;
+      }
+
       const updated = await this.applyDeltas(tx, wallet!, deltas);
       await this.insertMovement(tx, ctx, wallet!, {
         id: input.id,
         requestHash,
+        shiftId,
         type: 'void',
         paymentMethod: target.paymentMethod,
         amountCents: target.amountCents,
@@ -595,7 +612,7 @@ export class LedgerService {
       clientCreatedAt: m.clientCreatedAt ?? null,
       offline: m.offline ?? false,
       offlineIssues: m.offlineIssues ?? [],
-      shiftId: ctx.shiftId ?? null,
+      shiftId: m.shiftId !== undefined ? m.shiftId : (ctx.shiftId ?? null),
     });
   }
 }

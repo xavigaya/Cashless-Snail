@@ -212,6 +212,8 @@ export interface EventTotals {
   offlineSalesCount: number;
   /** Vendes sense connexió amb alguna incidència. */
   offlineIssuesCount: number;
+  /** Vendes sense connexió que el servidor no ha pogut registrar (consten a l'auditoria). */
+  offlineRejectedCount: number;
   promoBalanceOutstandingCents: number;
   activeWristbands: number;
   averageTicketCents: number;

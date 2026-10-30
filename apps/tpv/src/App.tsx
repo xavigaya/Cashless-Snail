@@ -49,6 +49,16 @@ export default function App() {
       }
       // Si el servidor diu que el terminal ja no és vàlid, cal tornar a vincular-lo.
       if (e instanceof ApiRequestError && (e.error.statusCode === 401 || e.error.code === 'TERMINAL_DISABLED')) {
+        // Amb vendes pendents no s'esborra res: sense el token del terminal es perdrien.
+        await offlineQueue.load();
+        if (offlineQueue.current.pending.length > 0) {
+          setState({
+            stage: 'error',
+            api,
+            message: 'Aquest terminal s’ha desactivat al backoffice, però té vendes fetes sense connexió pendents d’enviar. Torna’l a activar perquè les pugui enviar.',
+          });
+          return;
+        }
         await clearTerminal();
         setState({ stage: 'unpaired' });
         return;
@@ -67,9 +77,10 @@ export default function App() {
 
   // Envia les vendes pendents: periòdicament i quan l'app torna a primer pla.
   const pairedApi = state.stage === 'paired' ? state.api : null;
+  const pairedTerminalId = state.stage === 'paired' ? state.context.terminal.id : null;
   useEffect(() => {
-    if (!pairedApi) return;
-    const sync = () => void offlineQueue.sync(pairedApi);
+    if (!pairedApi || !pairedTerminalId) return;
+    const sync = () => void offlineQueue.sync(pairedApi, pairedTerminalId);
     sync();
     const timer = setInterval(sync, 15_000);
     const sub = AppState.addEventListener('change', (s) => s === 'active' && sync());
@@ -77,7 +88,7 @@ export default function App() {
       clearInterval(timer);
       sub.remove();
     };
-  }, [pairedApi]);
+  }, [pairedApi, pairedTerminalId]);
 
   const logout = () => {
     if (state.stage !== 'paired') return;
@@ -86,13 +97,15 @@ export default function App() {
     void connect(state.api);
   };
 
-  const unpair = () => {
+  const unpair = async () => {
     // Sense el token del terminal, les vendes pendents ja no es podrien enviar.
+    await offlineQueue.load();
     if (offlineQueue.current.pending.length > 0) {
       Alert.alert('Hi ha vendes pendents', 'Aquest terminal té vendes fetes sense connexió que encara no s’han enviat. Connecta’l a internet abans de desvincular-lo.');
       return;
     }
-    void Promise.all([clearTerminal(), clearTerminalCache()]).then(() => setState({ stage: 'unpaired' }));
+    await Promise.all([clearTerminal(), clearTerminalCache()]);
+    setState({ stage: 'unpaired' });
   };
 
   return (
@@ -125,7 +138,7 @@ export default function App() {
             setState({ ...state, session });
           }}
           onRefresh={() => connect(state.api)}
-          onUnpair={unpair}
+          onUnpair={() => void unpair()}
         />
       )}
 

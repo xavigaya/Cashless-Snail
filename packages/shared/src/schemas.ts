@@ -220,7 +220,9 @@ export const offlineSaleSchema = z.object({
   lines: z
     .array(z.object({ productId: uuid, quantity: z.number().int().min(1).max(99), unitPriceCents: positiveCents.max(100000) }))
     .min(1)
-    .max(50),
+    .max(50)
+    // Cap venda sense connexió pot superar 1.000 €: evita imports absurds (i desbordaments) d'un terminal defectuós.
+    .refine((lines) => lines.reduce((sum, l) => sum + l.quantity * l.unitPriceCents, 0) <= 100000, 'Import massa alt per a una venda'),
   clientCreatedAt: isoDate,
 });
 export type OfflineSaleInput = z.infer<typeof offlineSaleSchema>;

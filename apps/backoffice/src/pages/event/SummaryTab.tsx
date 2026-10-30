@@ -27,8 +27,14 @@ export function SummaryTab() {
     { label: 'Polseres actives', value: String(data.activeWristbands) },
     { label: 'Tiquet mitjà', value: formatEuros(data.averageTicketCents) },
     { label: 'Preu de polseres', value: formatEuros(data.wristbandFeesCents) },
-    ...(data.offlineSalesCount > 0
-      ? [{ label: 'Vendes sense connexió', value: String(data.offlineSalesCount), sub: `${data.offlineIssuesCount} amb incidències` }]
+    ...(data.offlineSalesCount > 0 || data.offlineRejectedCount > 0
+      ? [
+          {
+            label: 'Vendes sense connexió',
+            value: String(data.offlineSalesCount),
+            sub: `${data.offlineIssuesCount} amb incidències` + (data.offlineRejectedCount > 0 ? ` · ${data.offlineRejectedCount} rebutjades` : ''),
+          },
+        ]
       : []),
     ...(data.debtOutstandingCents > 0 ? [{ label: 'Deute pendent', value: formatEuros(data.debtOutstandingCents), sub: 'de vendes sense connexió' }] : []),
   ];

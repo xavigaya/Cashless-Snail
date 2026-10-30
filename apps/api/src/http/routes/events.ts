@@ -188,6 +188,7 @@ export function eventRoutes(deps: AppDeps) {
       debtOutstandingCents: 0,
       offlineSalesCount: 0,
       offlineIssuesCount: 0,
+      offlineRejectedCount: 0,
       promoBalanceOutstandingCents: 0,
       activeWristbands: 0,
       averageTicketCents: 0,
@@ -235,16 +236,21 @@ export function eventRoutes(deps: AppDeps) {
       SELECT count(DISTINCT wallet_id)::int AS n FROM movements WHERE event_id = ${id} AND wallet_id IS NOT NULL`);
     totals.activeWristbands = active[0]?.n ?? 0;
 
-    // Vendes sense connexió i deute actual de les polseres que han passat per aquest esdeveniment.
-    const offline = await db.execute<{ sales: number; issues: number; debt: number }>(sql`
+    // Vendes sense connexió, les rebutjades, i deute actual de les polseres que en tenen per vendes d'aquest esdeveniment.
+    const offline = await db.execute<{ sales: number; issues: number; rejected: number; debt: number }>(sql`
       SELECT
         (SELECT count(*)::int FROM movements WHERE event_id = ${id} AND offline) AS sales,
         (SELECT count(*)::int FROM movements WHERE event_id = ${id} AND cardinality(offline_issues) > 0) AS issues,
-        (SELECT coalesce(sum(-w.paid_cents), 0)::int FROM wallets w
-           WHERE w.paid_cents < 0 AND EXISTS (SELECT 1 FROM movements m WHERE m.wallet_id = w.id AND m.event_id = ${id})) AS debt`);
+        (SELECT count(DISTINCT target_id)::int FROM audit_log WHERE event_id = ${id} AND action = 'offline_sale.rejected') AS rejected,
+        (SELECT coalesce(sum(-w.paid_cents), 0)::bigint FROM wallets w
+           WHERE w.paid_cents < 0
+             AND EXISTS (SELECT 1 FROM movements m WHERE m.wallet_id = w.id AND m.event_id = ${id} AND m.offline)) AS debt`);
     totals.offlineSalesCount = offline[0]?.sales ?? 0;
     totals.offlineIssuesCount = offline[0]?.issues ?? 0;
-    totals.debtOutstandingCents = offline[0]?.debt ?? 0;
+    totals.offlineRejectedCount = offline[0]?.rejected ?? 0;
+    totals.debtOutstandingCents = Number(offline[0]?.debt ?? 0);
+    // El deute és un import a cobrar, no redueix el saldo que es deu a les altres polseres.
+    totals.paidBalanceOutstandingCents += totals.debtOutstandingCents;
 
     const byVendor = await db.execute<{ vendor_id: string; vendor_name: string; sales: number; n: number }>(sql`
       SELECT v.id AS vendor_id, v.name AS vendor_name,

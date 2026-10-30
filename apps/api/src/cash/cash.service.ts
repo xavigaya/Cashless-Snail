@@ -72,7 +72,11 @@ export class CashService {
     await this.db.transaction(async (tx) => {
       const [shift] = await tx.select().from(cashShifts).where(eq(cashShifts.id, shiftId)).for('update');
       if (!shift) throw notFound('Torn');
-      if (shift.closedAt) throw conflict('SHIFT_CLOSED', 'Aquest torn ja està tancat');
+      if (shift.closedAt) {
+        // Reintent del mateix tancament (p. ex. es va perdre la resposta): es retorna el resultat.
+        if (shift.declaredCashCents === input.declaredCashCents) return;
+        throw conflict('SHIFT_CLOSED', 'Aquest torn ja està tancat');
+      }
       const totals = (await this.totals(tx, [shiftId])).get(shiftId);
       await tx
         .update(cashShifts)
@@ -178,10 +182,12 @@ export class CashService {
       n: number;
     }>(sql`
       SELECT to_char(
-               (CASE WHEN movements.offline THEN coalesce(movements.client_created_at, movements.created_at) ELSE movements.created_at END
+               -- L'hora del terminal només es fa servir si és plausible (com a molt 2 dies abans de la sincronització).
+               (CASE WHEN movements.offline AND movements.client_created_at BETWEEN movements.created_at - interval '2 days' AND movements.created_at
+                     THEN movements.client_created_at ELSE movements.created_at END
                  AT TIME ZONE ${TIME_ZONE}) - make_interval(hours => ${DAY_STARTS_AT_HOUR}),
                'YYYY-MM-DD') AS day,
-             movements.terminal_id, t.name AS terminal_name, p.name AS pos_name,
+             t.id AS terminal_id, t.name AS terminal_name, p.name AS pos_name,
              ${signedSum('cash')} AS cash,
              ${signedSum('card')} AS card,
              coalesce(sum(CASE WHEN movements.type = 'sale' THEN movements.amount_cents
@@ -189,7 +195,9 @@ export class CashService {
                                ELSE 0 END), 0)::int AS sales,
              count(*)::int AS n
       FROM movements
-      LEFT JOIN terminals t ON t.id = movements.terminal_id
+      -- Una anul·lació del backoffice que compta en un torn de caixa s'atribueix al terminal d'aquell torn.
+      LEFT JOIN cash_shifts s ON s.id = movements.shift_id
+      LEFT JOIN terminals t ON t.id = coalesce(movements.terminal_id, s.terminal_id)
       LEFT JOIN points_of_sale p ON p.id = t.point_of_sale_id
       WHERE movements.event_id = ${eventId}
       GROUP BY 1, 2, 3, 4

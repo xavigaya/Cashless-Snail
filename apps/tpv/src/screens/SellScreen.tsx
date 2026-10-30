@@ -10,7 +10,7 @@ import { formatEuros, MOVEMENT_TYPE_LABELS, type Movement, type OperatorSession,
 import { ApiRequestError, newOperationId, type TpvApi } from '../api';
 import { BigButton, ErrorText, Header, ResultOverlay, Screen, styles as ui, type ResultState } from '../components';
 import { errorResult } from '../feedback';
-import { loadCatalog, offlineQueue, saveCatalog, type QueueState } from '../offline';
+import { loadCatalog, offlineQueue, saveCatalog, wristbandKey, type QueueState } from '../offline';
 import { colors, sizes } from '../theme';
 import { WristbandReader } from '../WristbandReader';
 
@@ -25,7 +25,8 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
   const [result, setResult] = useState<ResultState | null>(null);
   const [showVoids, setShowVoids] = useState(false);
   // L'identificador es manté si es reintenta la mateixa venda, perquè el servidor no la dupliqui.
-  const pendingSaleId = useRef<string | null>(null);
+  // Només es reutilitza si es repeteix exactament la mateixa venda (mateixa polsera i cistella).
+  const pendingSaleId = useRef<{ key: string; id: string } | null>(null);
   const { width } = useWindowDimensions();
   const columns = Math.max(2, Math.floor(width / 170));
 
@@ -72,7 +73,9 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
   async function charge(wristband: WristbandRef) {
     setReading(null);
     setBusy(true);
-    const saleId = (pendingSaleId.current ??= newOperationId());
+    const key = `${wristbandKey(wristband)}|${JSON.stringify(lines)}`;
+    if (pendingSaleId.current?.key !== key) pendingSaleId.current = { key, id: newOperationId() };
+    const saleId = pendingSaleId.current.id;
     try {
       const res = await api.sale(
         saleId,
@@ -83,7 +86,7 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
       setCart({});
       setResult({ ok: true, title: formatEuros(res.movement.amountCents), detail: `Saldo restant: ${formatEuros(res.balance.availableCents)}` });
       // Hi ha connexió: és un bon moment per enviar les vendes pendents.
-      void offlineQueue.sync(api);
+      void offlineQueue.sync(api, context.terminal.id);
     } catch (e) {
       if (e instanceof ApiRequestError && e.isNetwork) {
         await chargeOffline(wristband, saleId);
@@ -118,6 +121,7 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
     }
     await offlineQueue.add({
       id,
+      terminalId: context.terminal.id,
       wristband,
       operatorId: session.operator.id,
       lines: lines.map(([productId, quantity]) => ({ productId, quantity, unitPriceCents: byId.get(productId)?.priceCents ?? 0 })),

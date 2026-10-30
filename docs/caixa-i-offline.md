@@ -19,15 +19,15 @@ Quan la venda arriba al servidor, es registra **sempre**, perquè el producte ja
 | Polsera bloquejada | Estava bloquejada o marcada com a perduda. |
 | Polsera desconeguda / no activada | No s’havia activat a la taquilla en aquest esdeveniment. |
 | Preu diferent de l’actual | El preu del producte ha canviat des que el TPV va descarregar el catàleg. |
-| Supera el límit sense connexió | No hauria de passar, perquè el TPV ja ho comprova. |
-| Producte desactivat / Esdeveniment no actiu | S’han desactivat mentre el TPV estava sense xarxa. |
+| Producte desactivat o d’un altre venedor / Esdeveniment no actiu | S’han canviat mentre el TPV estava sense xarxa. |
+| Operador desconegut / sense permís de venda | L’operador que va vendre s’ha esborrat o se li ha canviat el rol. |
 
 Al backoffice:
 - a *Moviments*, el filtre *Sense connexió → Amb incidències* mostra les vendes a revisar;
 - al *Resum* surten el nombre de vendes sense connexió i el deute pendent;
 - a *Polseres* es veu el deute de cada polsera.
 
-Si el servidor rebutja una venda, el TPV mostra un botó vermell ⚠ amb la llista, perquè el cap de barra la comuniqui a l’organització. Passa, per exemple, amb un producte que no és d’aquell punt de venda.
+El servidor només rebutja una venda sense connexió en tres casos: si supera el límit de l’esdeveniment (el TPV ja ho impedeix, així que només passaria amb un terminal defectuós o manipulat), si porta un producte que no és de l’esdeveniment, o si arriba més de 7 dies després del final de l’esdeveniment. Cap venda pot superar els 1.000 €. Les vendes rebutjades queden a l’auditoria i se’n mostra el nombre al *Resum*. Al TPV surt un botó vermell ⚠ amb la llista, perquè el cap de barra la comuniqui a l’organització. Una venda que falla no bloqueja l’enviament de les altres.
 
 **Risc assumit:** sense connexió, el TPV no sap el saldo real de la polsera. El límit acota el que es pot perdre si algú gasta més del que té, o si gasta el mateix saldo a diverses barres alhora.
 
@@ -41,6 +41,8 @@ Tot el que es cobra a la taquilla (polseres, fiances i recàrregues) va dins d�
 4. **Torn oblidat.** Si un taquiller marxa sense tancar, es pot tancar des del backoffice, a *Caixa → Tanca*.
 
 **Efectiu esperat** = fons de canvi + efectiu cobrat durant el torn (polseres, fiances i recàrregues, menys devolucions i anul·lacions en efectiu).
+
+Si des del backoffice s’anul·la una recàrrega en efectiu mentre el seu torn és obert, l’anul·lació compta en aquell torn (els diners surten del mateix calaix). Si el torn ja s’ha tancat, l’anul·lació surt a la fila *Backoffice* del resum per jornada.
 
 Al backoffice, a la pestanya **Caixa**:
 - **Torns:** taquiller, terminal, hores, fons, efectiu, targeta, esperat, comptat i diferència.

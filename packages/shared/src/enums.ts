@@ -134,5 +134,7 @@ export const OFFLINE_ISSUE_LABELS: Partial<Record<ErrorCode, string>> = {
   EVENT_NOT_ACTIVE: 'Esdeveniment no actiu',
   OVER_OFFLINE_LIMIT: 'Supera el límit sense connexió',
   PRICE_CHANGED: 'Preu diferent de l’actual',
-  PRODUCT_UNAVAILABLE: 'Producte desactivat',
+  PRODUCT_UNAVAILABLE: 'Producte desactivat o d’un altre venedor',
+  FORBIDDEN_FOR_ROLE: 'Operador sense permís de venda',
+  NOT_FOUND: 'Operador desconegut',
 };
