@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  closeShiftSchema,
   createAdminUserSchema,
   MOVEMENT_TYPES,
   updateEventSchema,
@@ -24,6 +25,8 @@ const movementQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().optional(),
   type: z.enum(MOVEMENT_TYPES).optional(),
+  /** 'offline': només vendes sense connexió; 'issues': només les que tenen incidències. */
+  offline: z.enum(['offline', 'issues']).optional(),
 });
 
 interface AggregateRow extends Record<string, unknown> {
@@ -38,7 +41,7 @@ interface AggregateRow extends Record<string, unknown> {
 }
 
 export function eventRoutes(deps: AppDeps) {
-  const { db, access, ledger } = deps;
+  const { db, access, ledger, cash } = deps;
   const { requireAdmin } = authMiddleware(deps);
   const app = new Hono<AppEnv>({ strict: false });
 
@@ -81,6 +84,8 @@ export function eventRoutes(deps: AppDeps) {
     await access.event(c.get('admin'), id);
     const filters: SQL[] = [eq(movements.eventId, id)];
     if (query.type) filters.push(eq(movements.type, query.type));
+    if (query.offline === 'offline') filters.push(eq(movements.offline, true));
+    if (query.offline === 'issues') filters.push(sql`cardinality(${movements.offlineIssues}) > 0`);
     return c.json(await listMovements(db, and(...filters)!, { limit: query.limit, cursor: query.cursor }));
   });
 
@@ -131,6 +136,28 @@ export function eventRoutes(deps: AppDeps) {
     return c.json(toBalance(wristband!, wallet, await isActivatedInEvent(db, wallet.id, id)));
   });
 
+  // ---------- Caixa ----------
+
+  /** Torns de caixa de les taquilles i resum per terminal i jornada. */
+  app.get('/events/:eventId/cash', requireAdmin, async (c) => {
+    const id = eventId(c);
+    await access.event(c.get('admin'), id);
+    return c.json(await cash.report(id));
+  });
+
+  /** Tancament des del backoffice, per exemple si un taquiller ha marxat sense tancar. */
+  app.post('/events/:eventId/cash/shifts/:shiftId/close', requireAdmin, async (c) => {
+    const admin = c.get('admin');
+    const id = eventId(c);
+    const shiftId = parseUuid(c.req.param('shiftId'), 'shiftId');
+    const body = parseInput(closeShiftSchema, await readJson(c));
+    await access.event(admin, id);
+    await cash.assertInEvent(shiftId, id);
+    const shift = await cash.close(shiftId, { adminUserId: admin.id }, body);
+    await access.audit(db, admin, { eventId: id, action: 'cash_shift.close', targetType: 'cash_shift', targetId: shiftId, data: body });
+    return c.json(shift);
+  });
+
   /** Xifres principals de l'esdeveniment, netes d'anul·lacions. */
   app.get('/events/:eventId/summary', requireAdmin, async (c) => {
     const id = eventId(c);
@@ -158,6 +185,9 @@ export function eventRoutes(deps: AppDeps) {
       wristbandFeesCents: 0,
       depositsHeldCents: 0,
       paidBalanceOutstandingCents: 0,
+      debtOutstandingCents: 0,
+      offlineSalesCount: 0,
+      offlineIssuesCount: 0,
       promoBalanceOutstandingCents: 0,
       activeWristbands: 0,
       averageTicketCents: 0,
@@ -204,6 +234,17 @@ export function eventRoutes(deps: AppDeps) {
     const active = await db.execute<{ n: number }>(sql`
       SELECT count(DISTINCT wallet_id)::int AS n FROM movements WHERE event_id = ${id} AND wallet_id IS NOT NULL`);
     totals.activeWristbands = active[0]?.n ?? 0;
+
+    // Vendes sense connexió i deute actual de les polseres que han passat per aquest esdeveniment.
+    const offline = await db.execute<{ sales: number; issues: number; debt: number }>(sql`
+      SELECT
+        (SELECT count(*)::int FROM movements WHERE event_id = ${id} AND offline) AS sales,
+        (SELECT count(*)::int FROM movements WHERE event_id = ${id} AND cardinality(offline_issues) > 0) AS issues,
+        (SELECT coalesce(sum(-w.paid_cents), 0)::int FROM wallets w
+           WHERE w.paid_cents < 0 AND EXISTS (SELECT 1 FROM movements m WHERE m.wallet_id = w.id AND m.event_id = ${id})) AS debt`);
+    totals.offlineSalesCount = offline[0]?.sales ?? 0;
+    totals.offlineIssuesCount = offline[0]?.issues ?? 0;
+    totals.debtOutstandingCents = offline[0]?.debt ?? 0;
 
     const byVendor = await db.execute<{ vendor_id: string; vendor_name: string; sales: number; n: number }>(sql`
       SELECT v.id AS vendor_id, v.name AS vendor_name,

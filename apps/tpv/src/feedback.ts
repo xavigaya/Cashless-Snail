@@ -24,6 +24,14 @@ export function errorResult(error: unknown, fallback = 'No s’ha pogut fer l’
       return { ok: false, title: 'Polsera no activada', detail: 'Cal activar-la a la taquilla d’aquest esdeveniment' };
     case 'WRISTBAND_NOT_FOUND':
       return { ok: false, title: 'Polsera no activada', detail: 'Cal activar-la a la taquilla' };
+    case 'WRISTBAND_IN_DEBT':
+      return {
+        ok: false,
+        title: 'Polsera amb deute',
+        detail: `Deu ${formatEuros((error.error.details as { debtCents?: number } | undefined)?.debtCents ?? 0)} d’una venda sense connexió: cal recarregar a la taquilla`,
+      };
+    case 'SHIFT_NOT_OPEN':
+      return { ok: false, title: 'Caixa tancada', detail: error.message };
     case 'EVENT_NOT_ACTIVE':
       return { ok: false, title: 'Esdeveniment no actiu', detail: error.message };
     default:

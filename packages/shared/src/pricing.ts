@@ -37,6 +37,16 @@ export function splitDebit(totalCents: number, promoBalanceCents: number, paidBa
   return { promoCents, paidCents: totalCents - promoCents };
 }
 
+/**
+ * Repartiment d'una venda feta sense connexió: s'accepta encara que no hi hagi prou saldo.
+ * Primer es gasta el promocional que hi hagi; la resta surt del pagat, que pot quedar negatiu (deute).
+ */
+export function splitDebitAllowingDebt(totalCents: number, promoBalanceCents: number): DebitSplit {
+  if (totalCents < 0) throw new Error('El total no pot ser negatiu');
+  const promoCents = Math.max(0, Math.min(promoBalanceCents, totalCents));
+  return { promoCents, paidCents: totalCents - promoCents };
+}
+
 /** Agrupa línies repetides del mateix producte (p. ex. tocar dues vegades el mateix botó). */
 export function mergeLines<T extends { productId: string; quantity: number }>(lines: T[]): T[] {
   const byProduct = new Map<string, T>();

@@ -7,6 +7,9 @@ import { Hono } from 'hono';
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import {
   activationSchema,
+  closeShiftSchema,
+  offlineSaleSchema,
+  openShiftSchema,
   operatorLoginSchema,
   pairTerminalSchema,
   saleSchema,
@@ -18,7 +21,7 @@ import {
   type TerminalContext,
 } from '@cashless/shared';
 import { randomToken, sha256, verifySecret } from '../../common/crypto';
-import { DomainError, forbidden, notFound, parseInput } from '../../common/errors';
+import { DomainError, forbidden, notFound, parseInput, parseUuid, unprocessable } from '../../common/errors';
 import { signJwt } from '../../common/jwt';
 import { events, movements, operators, pointsOfSale, products, terminals } from '../../db/schema';
 import {
@@ -41,7 +44,7 @@ const MAX_PIN_ATTEMPTS = 5;
 const PIN_LOCK_MINUTES = 5;
 
 export function tpvRoutes(deps: AppDeps) {
-  const { db, config, ledger } = deps;
+  const { db, config, ledger, cash } = deps;
   const { requireTerminal, requireOperator } = authMiddleware(deps);
   const app = new Hono<AppEnv>({ strict: false });
 
@@ -71,13 +74,14 @@ export function tpvRoutes(deps: AppDeps) {
         status: row.event.status,
         wristbandPriceCents: row.event.wristbandPriceCents,
         wristbandDepositCents: row.event.wristbandDepositCents,
+        offlineSaleLimitCents: row.event.offlineSaleLimitCents,
       },
       pointOfSale: { id: row.pos.id, name: row.pos.name, kind: row.pos.kind },
       operators: ops.filter((o) => allowedRoles.includes(o.role)),
     };
   }
 
-  async function operationContext(terminal: TerminalPrincipal, operator: OperatorPrincipal): Promise<OperationContext> {
+  async function operationContext(terminal: TerminalPrincipal, operatorId: string): Promise<OperationContext> {
     const [event] = await db.select().from(events).where(eq(events.id, terminal.eventId)).limit(1);
     if (!event) throw notFound('Esdeveniment');
     return {
@@ -85,9 +89,24 @@ export function tpvRoutes(deps: AppDeps) {
       pointOfSaleId: terminal.pointOfSaleId,
       vendorId: terminal.vendorId,
       terminalId: terminal.id,
-      operatorId: operator.id,
+      operatorId,
       adminUserId: null,
     };
+  }
+
+  /** A la taquilla, les operacions que cobren van dins del torn de caixa obert de l'operador. */
+  async function cashContext(terminal: TerminalPrincipal, operator: OperatorPrincipal): Promise<OperationContext> {
+    const shift = await cash.openShiftOf(db, terminal.id);
+    if (!shift) throw unprocessable('SHIFT_NOT_OPEN', 'Cal obrir la caixa abans de cobrar');
+    if (shift.operatorId !== operator.id) {
+      throw unprocessable('SHIFT_NOT_OPEN', 'La caixa d’aquesta taquilla és d’un altre operador: cal tancar el seu torn i obrir-ne un de nou');
+    }
+    return { ...(await operationContext(terminal, operator.id)), shiftId: shift.id };
+  }
+
+  function assertBoxOffice(terminal: TerminalPrincipal, operator: OperatorPrincipal): void {
+    if (terminal.posKind !== 'box_office') throw forbidden('La caixa només es porta a les taquilles');
+    assertOperatorRole(operator.role, BOX_OFFICE_ROLES);
   }
 
   app.post('/tpv/pair', async (c) => {
@@ -189,7 +208,7 @@ export function tpvRoutes(deps: AppDeps) {
     const body = parseInput(saleSchema, await readJson(c));
     if (terminal.posKind === 'box_office') throw forbidden('Una taquilla no pot vendre productes');
     assertOperatorRole(operator.role, SALE_ROLES);
-    return c.json(await ledger.sale(await operationContext(terminal, operator), body), 201);
+    return c.json(await ledger.sale(await operationContext(terminal, operator.id), body), 201);
   });
 
   app.post('/tpv/topups', requireTerminal, requireOperator, async (c) => {
@@ -198,7 +217,7 @@ export function tpvRoutes(deps: AppDeps) {
     const body = parseInput(topupSchema, await readJson(c));
     if (terminal.posKind !== 'box_office') throw forbidden('Les recàrregues es fan a la taquilla');
     assertOperatorRole(operator.role, BOX_OFFICE_ROLES);
-    return c.json(await ledger.topup(await operationContext(terminal, operator), body), 201);
+    return c.json(await ledger.topup(await cashContext(terminal, operator), body), 201);
   });
 
   app.post('/tpv/activations', requireTerminal, requireOperator, async (c) => {
@@ -207,7 +226,7 @@ export function tpvRoutes(deps: AppDeps) {
     const body = parseInput(activationSchema, await readJson(c));
     if (terminal.posKind !== 'box_office') throw forbidden('Les polseres s’activen a la taquilla');
     assertOperatorRole(operator.role, BOX_OFFICE_ROLES);
-    return c.json(await ledger.activate(await operationContext(terminal, operator), body), 201);
+    return c.json(await ledger.activate(await cashContext(terminal, operator), body), 201);
   });
 
   app.post('/tpv/voids', requireTerminal, requireOperator, async (c) => {
@@ -215,11 +234,63 @@ export function tpvRoutes(deps: AppDeps) {
     const operator = c.get('operator');
     const body = parseInput(voidSchema, await readJson(c));
     assertOperatorRole(operator.role, VOID_ROLES);
-    const result = await ledger.void(await operationContext(terminal, operator), body, {
+    const result = await ledger.void(await operationContext(terminal, operator.id), body, {
       allowedTypes: ['sale'],
       pointOfSaleId: terminal.pointOfSaleId,
     });
     return c.json(result, 201);
+  });
+
+  /**
+   * Sincronització de vendes fetes sense connexió. Només cal el token del terminal:
+   * quan torna la xarxa, l'operador que va vendre potser ja no hi és.
+   */
+  app.post('/tpv/offline-sales', requireTerminal, async (c) => {
+    const terminal = c.get('terminal');
+    const body = parseInput(offlineSaleSchema, await readJson(c));
+    if (terminal.posKind === 'box_office') throw forbidden('Una taquilla no pot vendre productes');
+    const [operator] = await db
+      .select({ id: operators.id, role: operators.role })
+      .from(operators)
+      .where(and(eq(operators.id, body.operatorId), eq(operators.eventId, terminal.eventId)))
+      .limit(1);
+    if (!operator) throw notFound('Operador');
+    assertOperatorRole(operator.role, SALE_ROLES);
+    return c.json(await ledger.offlineSale(await operationContext(terminal, operator.id), body), 201);
+  });
+
+  // ---------- Caixa de taquilla ----------
+
+  /** Torn obert d'aquesta taquilla (de qualsevol operador), o null. */
+  app.get('/tpv/shift', requireTerminal, requireOperator, async (c) => {
+    const terminal = c.get('terminal');
+    assertBoxOffice(terminal, c.get('operator'));
+    const shift = await cash.openShiftOf(db, terminal.id);
+    return c.json(shift ? await cash.get(shift.id) : null);
+  });
+
+  app.post('/tpv/shift/open', requireTerminal, requireOperator, async (c) => {
+    const terminal = c.get('terminal');
+    const operator = c.get('operator');
+    const body = parseInput(openShiftSchema, await readJson(c));
+    assertBoxOffice(terminal, operator);
+    return c.json(await cash.open({ eventId: terminal.eventId, terminalId: terminal.id, operatorId: operator.id }, body), 201);
+  });
+
+  /** Qualsevol taquiller d'aquest terminal pot tancar el torn obert (relleu): compta l'efectiu i el declara. */
+  app.post('/tpv/shift/:shiftId/close', requireTerminal, requireOperator, async (c) => {
+    const terminal = c.get('terminal');
+    const operator = c.get('operator');
+    const shiftId = parseUuid(c.req.param('shiftId'), 'shiftId');
+    const body = parseInput(closeShiftSchema, await readJson(c));
+    assertBoxOffice(terminal, operator);
+    const open = await cash.openShiftOf(db, terminal.id);
+    if (!open || open.id !== shiftId) {
+      const existing = await cash.get(shiftId).catch(() => null);
+      if (existing?.terminalId === terminal.id) throw new DomainError('SHIFT_CLOSED', 'Aquest torn ja està tancat', 409);
+      throw notFound('Torn');
+    }
+    return c.json(await cash.close(shiftId, { operatorId: operator.id }, body));
   });
 
   return app;

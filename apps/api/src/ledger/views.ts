@@ -24,7 +24,9 @@ export function toBalance(
     paidCents,
     promoCents,
     depositCents: wallet?.depositCents ?? 0,
-    availableCents: status === 'active' ? paidCents + promoCents : 0,
+    // Amb deute (pagat negatiu) no es pot gastar res fins que es recarregui.
+    availableCents: status === 'active' && paidCents >= 0 ? paidCents + promoCents : 0,
+    debtCents: Math.max(0, -paidCents),
     activatedInEvent,
   };
 }
@@ -87,6 +89,9 @@ export async function loadMovements(db: Queryable, ids: string[]): Promise<Movem
         reversesMovementId: m.reversesMovementId,
         voidedByMovementId: voidedBy.get(m.id) ?? null,
         reason: m.reason,
+        offline: m.offline,
+        offlineIssues: m.offlineIssues as Movement['offlineIssues'],
+        clientCreatedAt: m.clientCreatedAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
         lines: lines
           .filter((l) => l.movementId === m.id)

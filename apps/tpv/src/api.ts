@@ -8,6 +8,8 @@ import type {
   ActivationResult,
   ApiError,
   Balance,
+  CashShift,
+  OfflineSaleInput,
   Movement,
   OperationResult,
   OperatorSession,
@@ -84,6 +86,23 @@ export class TpvApi {
 
   activate(id: string, wristband: WristbandRef, method: 'cash' | 'card') {
     return this.request<ActivationResult>('POST', '/tpv/activations', { id, wristband, method, clientCreatedAt: new Date().toISOString() }, true);
+  }
+
+  /** Envia una venda feta sense connexió. Només necessita el token del terminal. */
+  offlineSale(sale: Omit<OfflineSaleInput, 'clientCreatedAt'> & { clientCreatedAt: string }) {
+    return this.request<OperationResult>('POST', '/tpv/offline-sales', sale);
+  }
+
+  currentShift() {
+    return this.request<CashShift | null>('GET', '/tpv/shift');
+  }
+
+  openShift(id: string, openingFloatCents: number) {
+    return this.request<CashShift>('POST', '/tpv/shift/open', { id, openingFloatCents }, true);
+  }
+
+  closeShift(shiftId: string, declaredCashCents: number, note?: string) {
+    return this.request<CashShift>('POST', `/tpv/shift/${shiftId}/close`, { declaredCashCents, note }, true);
   }
 
   void(id: string, movementId: string, reason: string) {

@@ -19,6 +19,7 @@ export function toEvent(row: EventRow): EventSummary {
     wristbandPriceCents: row.wristbandPriceCents,
     wristbandDepositCents: row.wristbandDepositCents,
     maxBalanceCents: row.maxBalanceCents,
+    offlineSaleLimitCents: row.offlineSaleLimitCents,
   };
 }
 

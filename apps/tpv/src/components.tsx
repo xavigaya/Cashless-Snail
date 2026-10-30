@@ -116,11 +116,13 @@ export function NumberPad({ onDigit, onDelete, onClear }: { onDigit: (d: string)
 
 export interface ResultState {
   ok: boolean;
+  /** Correcte però amb avís (p. ex. cobrat sense connexió): fons taronja. */
+  warn?: boolean;
   title: string;
   detail?: string;
 }
 
-/** Pantalla completa verda o vermella amb el resultat d'una operació. */
+/** Pantalla completa verda, taronja o vermella amb el resultat d'una operació. */
 export function ResultOverlay({ result, onDismiss }: { result: ResultState | null; onDismiss: () => void }) {
   useEffect(() => {
     if (!result) return;
@@ -134,7 +136,7 @@ export function ResultOverlay({ result, onDismiss }: { result: ResultState | nul
 
   if (!result) return null;
   return (
-    <Pressable style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: result.ok ? colors.ok : colors.bad }]} onPress={onDismiss}>
+    <Pressable style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: !result.ok ? colors.bad : result.warn ? colors.warn : colors.ok }]} onPress={onDismiss}>
       <Text style={styles.overlayIcon}>{result.ok ? '✓' : '✕'}</Text>
       <Text style={styles.overlayTitle}>{result.title}</Text>
       {result.detail ? <Text style={styles.overlayDetail}>{result.detail}</Text> : null}

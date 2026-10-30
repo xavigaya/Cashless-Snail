@@ -19,6 +19,7 @@ const TABS = [
   { to: 'staff', label: 'Operadors i terminals' },
   { to: 'movements', label: 'Moviments' },
   { to: 'wristbands', label: 'Polseres' },
+  { to: 'cash', label: 'Caixa' },
 ];
 
 export function EventLayout() {

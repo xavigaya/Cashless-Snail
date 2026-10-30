@@ -54,6 +54,7 @@ const eventBase = z.object({
   wristbandPriceCents: cents.default(0),
   wristbandDepositCents: cents.default(0),
   maxBalanceCents: positiveCents.default(50000),
+  offlineSaleLimitCents: cents.max(100000).default(2000),
 });
 
 export const createEventSchema = eventBase.refine((e) => e.endsAt > e.startsAt, {
@@ -207,6 +208,34 @@ export const activationSchema = z.object({
   clientCreatedAt: isoDate.optional(),
 });
 export type ActivationInput = z.infer<typeof activationSchema>;
+
+/**
+ * Venda feta sense connexió, que el terminal envia quan torna la xarxa.
+ * Porta el preu que es va cobrar i l'operador que la va fer (pot ser que ja no tingui sessió).
+ */
+export const offlineSaleSchema = z.object({
+  id: uuid,
+  wristband: wristbandRefSchema,
+  operatorId: uuid,
+  lines: z
+    .array(z.object({ productId: uuid, quantity: z.number().int().min(1).max(99), unitPriceCents: positiveCents.max(100000) }))
+    .min(1)
+    .max(50),
+  clientCreatedAt: isoDate,
+});
+export type OfflineSaleInput = z.infer<typeof offlineSaleSchema>;
+
+export const openShiftSchema = z.object({
+  id: uuid,
+  openingFloatCents: cents.max(1_000_000),
+});
+export type OpenShiftInput = z.infer<typeof openShiftSchema>;
+
+export const closeShiftSchema = z.object({
+  declaredCashCents: cents.max(10_000_000),
+  note: z.string().max(200).optional(),
+});
+export type CloseShiftInput = z.infer<typeof closeShiftSchema>;
 
 export const voidSchema = z.object({
   id: uuid,

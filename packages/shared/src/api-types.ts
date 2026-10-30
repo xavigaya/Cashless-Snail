@@ -55,6 +55,8 @@ export interface EventSummary {
   wristbandPriceCents: number;
   wristbandDepositCents: number;
   maxBalanceCents: number;
+  /** Import màxim per venda sense connexió (0 = desactivat). */
+  offlineSaleLimitCents: number;
 }
 
 export interface Vendor {
@@ -117,8 +119,10 @@ export interface Balance {
   paidCents: number;
   promoCents: number;
   depositCents: number;
-  /** Saldo que es pot gastar ara (pagat + promocional). */
+  /** Saldo que es pot gastar ara (pagat + promocional). És 0 si hi ha deute. */
   availableCents: number;
+  /** Deute pendent per vendes fetes sense connexió: s'ha de recarregar abans de tornar a comprar. */
+  debtCents: number;
   /** Si s'ha pagat l'activació de la polsera en aquest esdeveniment (cal per recarregar i comprar). */
   activatedInEvent: boolean;
 }
@@ -151,6 +155,12 @@ export interface Movement {
   reversesMovementId: string | null;
   voidedByMovementId: string | null;
   reason: string | null;
+  /** Venda feta sense connexió. */
+  offline: boolean;
+  /** Problemes que s'haurien detectat amb connexió. */
+  offlineIssues: ErrorCode[];
+  /** Hora real de l'operació al terminal (en les vendes sense connexió, anterior a createdAt). */
+  clientCreatedAt: string | null;
   createdAt: string;
   lines: MovementLine[];
 }
@@ -171,7 +181,7 @@ export interface ActivationResult {
 /** Context que rep el terminal un cop vinculat. */
 export interface TerminalContext {
   terminal: { id: string; name: string };
-  event: { id: string; name: string; status: EventStatus; wristbandPriceCents: number; wristbandDepositCents: number };
+  event: { id: string; name: string; status: EventStatus; wristbandPriceCents: number; wristbandDepositCents: number; offlineSaleLimitCents: number };
   pointOfSale: { id: string; name: string; kind: PosKind };
   operators: { id: string; name: string; role: OperatorRole }[];
 }
@@ -197,11 +207,59 @@ export interface EventTotals {
   wristbandFeesCents: number;
   depositsHeldCents: number;
   paidBalanceOutstandingCents: number;
+  /** Deute de les polseres que han comprat en aquest esdeveniment (vendes sense connexió). */
+  debtOutstandingCents: number;
+  offlineSalesCount: number;
+  /** Vendes sense connexió amb alguna incidència. */
+  offlineIssuesCount: number;
   promoBalanceOutstandingCents: number;
   activeWristbands: number;
   averageTicketCents: number;
   salesByVendor: { vendorId: string; vendorName: string; salesCents: number; count: number }[];
   topProducts: { productId: string; name: string; quantity: number; totalCents: number }[];
+}
+
+/** Torn de caixa d'una taquilla. */
+export interface CashShift {
+  id: string;
+  eventId: string;
+  terminalId: string;
+  terminalName: string;
+  operatorId: string;
+  operatorName: string;
+  openingFloatCents: number;
+  openedAt: string;
+  closedAt: string | null;
+  closedByName: string | null;
+  /** Efectiu cobrat durant el torn (recàrregues, polseres i fiances; menys devolucions). */
+  cashCents: number;
+  /** Cobrat amb targeta: s'ha de quadrar amb el datàfon. */
+  cardCents: number;
+  operations: number;
+  /** Fons + efectiu cobrat. Al tancar es desa el valor d'aquell moment. */
+  expectedCashCents: number;
+  declaredCashCents: number | null;
+  /** Declarat − esperat (negatiu = falta efectiu). */
+  differenceCents: number | null;
+  note: string | null;
+}
+
+/** Totals d'un terminal en una jornada (de 6:00 a 6:00, hora de Catalunya). */
+export interface CashDailyRow {
+  day: string;
+  terminalId: string | null;
+  terminalName: string;
+  pointOfSaleName: string | null;
+  cashCents: number;
+  cardCents: number;
+  /** Vendes netes d'anul·lacions. */
+  salesCents: number;
+  operations: number;
+}
+
+export interface CashReport {
+  shifts: CashShift[];
+  daily: CashDailyRow[];
 }
 
 export interface Page<T> {

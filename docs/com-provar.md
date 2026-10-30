@@ -90,8 +90,8 @@ Amb un sol mòbil, vincula’l primer a la **Taquilla 1**. Després prem **Desvi
 
 **A la taquilla** (Pere, PIN `4444`):
 
-1. *Llegeix una polsera* → apropa-la. Ha de sortir **Polsera nova**.
-2. *Activa · 1,00 €* → pantalla verda.
+1. **Obre la caixa**: escriu el fons de canvi en cèntims (per exemple `5000` = 50,00 €) i prem *Obre*.
+2. *Llegeix una polsera* → apropa-la. Ha de sortir **Polsera nova**. *Activa · 1,00 €* → pantalla verda.
 3. Tria 10 € i *Recarrega* → saldo 10,00 €.
 
 **A la barra** (Marc, PIN `2222`):
@@ -110,9 +110,20 @@ Amb un sol mòbil, vincula’l primer a la **Taquilla 1**. Després prem **Desvi
 9. A *Moviments*, hi ha d’haver l’activació, la recàrrega, la venda (marcada com a anul·lada) i l’anul·lació.
 10. A *Polseres*, cerca el codi de la polsera i prem *Bloqueja*. Torna a la barra i prova de cobrar: ha de sortir **Polsera bloquejada**.
 
+**Venda sense connexió:**
+
+11. A la barra, posa el mòbil en mode avió. Toca dues *Cervesa* → *Cobra* → apropa la polsera: surt una pantalla **taronja** («Cobrat sense connexió»). A dalt hi diu quantes vendes queden pendents d’enviar.
+12. Prova de cobrar més del límit (per defecte 20 €): ha de sortir vermell.
+13. Treu el mode avió. En uns segons la venda s’envia sola i desapareix l’avís de pendents. Al backoffice, a *Moviments*, surt marcada **sense connexió** (amb l’hora real de la venda). Si el saldo no arribava, també hi diu **Saldo insuficient (deute)** i la polsera no pot tornar a comprar fins que es recarregui.
+
+**Tancament de caixa:**
+
+14. A la taquilla, *Tanca caixa* → compta l’efectiu del calaix (fons inclòs) i escriu-lo. Surt si quadra, si falta o si sobra. A *Caixa* del backoffice hi ha el torn amb l’esperat, el comptat i la diferència, i a sota els totals per terminal i jornada.
+15. Si un altre taquiller entra a la mateixa taquilla amb la caixa oberta, primer ha de comptar i tancar el torn del company (relleu). Des del backoffice també es pot tancar un torn que hagi quedat obert.
+
 **Activació per esdeveniment:**
 
-11. Crea un segon esdeveniment a la mateixa entitat, amb una taquilla, un taquiller i un terminal, i activa’l. Llegeix la mateixa polsera: ha de mostrar el saldo, però també l’avís que no està activada en aquest esdeveniment. No es pot recarregar fins que no s’hi activi.
+16. Crea un segon esdeveniment a la mateixa entitat, amb una taquilla, un taquiller i un terminal, i activa’l. Llegeix la mateixa polsera: ha de mostrar el saldo, però també l’avís que no està activada en aquest esdeveniment. No es pot recarregar fins que no s’hi activi.
 
 ## 5. Proves automàtiques
 

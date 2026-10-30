@@ -2,6 +2,7 @@
  * Definició de les taules per a Drizzle ORM.
  * Ha de coincidir amb les migracions SQL de /migrations, que són la font de veritat de l'esquema.
  */
+import { sql } from 'drizzle-orm';
 import { bigserial, boolean, integer, jsonb, pgTable, text, timestamp, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type {
   AdminRole,
@@ -50,6 +51,8 @@ export const events = pgTable('events', {
   wristbandPriceCents: integer('wristband_price_cents').notNull().default(0),
   wristbandDepositCents: integer('wristband_deposit_cents').notNull().default(0),
   maxBalanceCents: integer('max_balance_cents').notNull().default(50000),
+  /** Import màxim per venda sense connexió; 0 = no es pot vendre sense connexió (migració 0005). */
+  offlineSaleLimitCents: integer('offline_sale_limit_cents').notNull().default(2000),
   createdAt: createdAt(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 });
@@ -149,6 +152,28 @@ export const wristbands = pgTable('wristbands', {
   createdAt: createdAt(),
 });
 
+/** Torns de caixa de les taquilles (migració 0005). */
+export const cashShifts = pgTable('cash_shifts', {
+  id: uuid('id').primaryKey(),
+  eventId: uuid('event_id')
+    .notNull()
+    .references(() => events.id),
+  terminalId: uuid('terminal_id')
+    .notNull()
+    .references(() => terminals.id),
+  operatorId: uuid('operator_id')
+    .notNull()
+    .references(() => operators.id),
+  openingFloatCents: integer('opening_float_cents').notNull(),
+  openedAt: tstz('opened_at').notNull().defaultNow(),
+  closedAt: tstz('closed_at'),
+  closedByOperatorId: uuid('closed_by_operator_id').references(() => operators.id),
+  closedByAdminId: uuid('closed_by_admin_id').references(() => adminUsers.id),
+  declaredCashCents: integer('declared_cash_cents'),
+  expectedCashCents: integer('expected_cash_cents'),
+  note: text('note'),
+});
+
 export const wallets = pgTable('wallets', {
   id: uuid('id').primaryKey().defaultRandom(),
   wristbandId: uuid('wristband_id')
@@ -157,6 +182,7 @@ export const wallets = pgTable('wallets', {
   organizationId: uuid('organization_id')
     .notNull()
     .references(() => organizations.id),
+  /** Pot ser negatiu: deute d'una venda feta sense connexió (migració 0005). */
   paidCents: integer('paid_cents').notNull().default(0),
   promoCents: integer('promo_cents').notNull().default(0),
   depositCents: integer('deposit_cents').notNull().default(0),
@@ -193,6 +219,11 @@ export const movements = pgTable('movements', {
   reason: text('reason'),
   requestHash: text('request_hash').notNull(),
   clientCreatedAt: tstz('client_created_at'),
+  /** Venda feta sense connexió i sincronitzada després (migració 0005). */
+  offline: boolean('offline').notNull().default(false),
+  /** Problemes que s'haurien detectat amb connexió (codis d'ERROR_CODES). */
+  offlineIssues: text('offline_issues').array().notNull().default(sql`'{}'::text[]`),
+  shiftId: uuid('shift_id').references(() => cashShifts.id),
   createdAt: createdAt(),
 });
 
@@ -231,3 +262,4 @@ export type WristbandRow = typeof wristbands.$inferSelect;
 export type WalletRow = typeof wallets.$inferSelect;
 export type MovementRow = typeof movements.$inferSelect;
 export type MovementLineRow = typeof movementLines.$inferSelect;
+export type CashShiftRow = typeof cashShifts.$inferSelect;

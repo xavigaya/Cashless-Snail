@@ -4,6 +4,7 @@ import type { AppConfig } from '../config';
 import type { Db } from '../db/db';
 import type { LedgerService } from '../ledger/ledger.service';
 import type { AdminAccess } from '../admin/admin-access';
+import type { CashService } from '../cash/cash.service';
 import type { AdminPrincipal, OperatorPrincipal, TerminalPrincipal } from '../auth/principals';
 
 export interface AppDeps {
@@ -11,6 +12,7 @@ export interface AppDeps {
   config: AppConfig;
   ledger: LedgerService;
   access: AdminAccess;
+  cash: CashService;
   /** IP del client (per al límit d'intents). Depèn de l'entorn: Node o Edge. */
   clientIp: (c: Context) => string;
 }

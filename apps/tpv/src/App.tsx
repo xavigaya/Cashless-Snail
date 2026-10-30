@@ -3,9 +3,11 @@
  *  1. Sense vincular → PairScreen
  *  2. Vinculat, sense operador → OperatorScreen
  *  3. Operador amb sessió → SellScreen (barra/cuina) o BoxOfficeScreen (taquilla)
+ *
+ * Mentre el terminal està vinculat, les vendes fetes sense connexió s'envien cada pocs segons.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { OperatorSession, TerminalContext } from '@cashless/shared';
@@ -15,7 +17,8 @@ import { BoxOfficeScreen } from './screens/BoxOfficeScreen';
 import { OperatorScreen } from './screens/OperatorScreen';
 import { PairScreen } from './screens/PairScreen';
 import { SellScreen } from './screens/SellScreen';
-import { clearTerminal, loadTerminal } from './storage';
+import { clearTerminalCache, loadContext, offlineQueue, saveContext } from './offline';
+import { clearSession, clearTerminal, loadSession, loadTerminal, saveSession } from './storage';
 import { colors } from './theme';
 
 type State =
@@ -27,11 +30,23 @@ type State =
 export default function App() {
   const [state, setState] = useState<State>({ stage: 'loading' });
 
-  const connect = useCallback(async (api: TpvApi) => {
+  const connect = useCallback(async (api: TpvApi, resume = false) => {
+    // Si el mòbil s'ha reiniciat, es recupera la sessió de l'operador (encara vàlida).
+    const session = resume ? await loadSession() : null;
+    if (session) api.operatorToken = session.token;
     try {
       const context = await api.context();
-      setState({ stage: 'paired', api, context, session: null });
+      await saveContext(context);
+      setState({ stage: 'paired', api, context, session });
     } catch (e) {
+      // Sense xarxa: es continua amb el context desat, per poder vendre sense connexió.
+      if (e instanceof ApiRequestError && e.isNetwork) {
+        const cached = await loadContext();
+        if (cached) {
+          setState({ stage: 'paired', api, context: cached, session });
+          return;
+        }
+      }
       // Si el servidor diu que el terminal ja no és vàlid, cal tornar a vincular-lo.
       if (e instanceof ApiRequestError && (e.error.statusCode === 401 || e.error.code === 'TERMINAL_DISABLED')) {
         await clearTerminal();
@@ -46,14 +61,38 @@ export default function App() {
     void (async () => {
       const stored = await loadTerminal();
       if (!stored) setState({ stage: 'unpaired' });
-      else await connect(new TpvApi(stored.apiUrl, stored.terminalToken));
+      else await connect(new TpvApi(stored.apiUrl, stored.terminalToken), true);
     })();
   }, [connect]);
+
+  // Envia les vendes pendents: periòdicament i quan l'app torna a primer pla.
+  const pairedApi = state.stage === 'paired' ? state.api : null;
+  useEffect(() => {
+    if (!pairedApi) return;
+    const sync = () => void offlineQueue.sync(pairedApi);
+    sync();
+    const timer = setInterval(sync, 15_000);
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && sync());
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [pairedApi]);
 
   const logout = () => {
     if (state.stage !== 'paired') return;
     state.api.logout();
+    void clearSession();
     void connect(state.api);
+  };
+
+  const unpair = () => {
+    // Sense el token del terminal, les vendes pendents ja no es podrien enviar.
+    if (offlineQueue.current.pending.length > 0) {
+      Alert.alert('Hi ha vendes pendents', 'Aquest terminal té vendes fetes sense connexió que encara no s’han enviat. Connecta’l a internet abans de desvincular-lo.');
+      return;
+    }
+    void Promise.all([clearTerminal(), clearTerminalCache()]).then(() => setState({ stage: 'unpaired' }));
   };
 
   return (
@@ -81,11 +120,12 @@ export default function App() {
         <OperatorScreen
           api={state.api}
           context={state.context}
-          onLogin={(session) => setState({ ...state, session })}
-          onRefresh={() => connect(state.api)}
-          onUnpair={() => {
-            void clearTerminal().then(() => setState({ stage: 'unpaired' }));
+          onLogin={(session) => {
+            void saveSession(session);
+            setState({ ...state, session });
           }}
+          onRefresh={() => connect(state.api)}
+          onUnpair={unpair}
         />
       )}
 

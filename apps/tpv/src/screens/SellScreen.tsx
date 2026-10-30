@@ -1,6 +1,8 @@
 /**
  * Venda a barra o cuina: botons grans de producte, cistella i cobrament amb polsera.
  * Objectiu: tres tocs per venda (producte → Cobra → apropar la polsera).
+ *
+ * Sense connexió es pot continuar cobrant fins al límit de l'esdeveniment (vegeu offline.ts).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -8,6 +10,7 @@ import { formatEuros, MOVEMENT_TYPE_LABELS, type Movement, type OperatorSession,
 import { ApiRequestError, newOperationId, type TpvApi } from '../api';
 import { BigButton, ErrorText, Header, ResultOverlay, Screen, styles as ui, type ResultState } from '../components';
 import { errorResult } from '../feedback';
+import { loadCatalog, offlineQueue, saveCatalog, type QueueState } from '../offline';
 import { colors, sizes } from '../theme';
 import { WristbandReader } from '../WristbandReader';
 
@@ -26,17 +29,31 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
   const { width } = useWindowDimensions();
   const columns = Math.max(2, Math.floor(width / 170));
 
+  const [queue, setQueue] = useState<QueueState>(offlineQueue.current);
+  const [showRejected, setShowRejected] = useState(false);
+  const offlineLimit = context.event.offlineSaleLimitCents;
+
   const load = useCallback(async () => {
     try {
-      setProducts(await api.catalog());
+      const list = await api.catalog();
+      setProducts(list);
+      void saveCatalog(list);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'No s’ha pogut carregar el catàleg');
+      const cached = e instanceof ApiRequestError && e.isNetwork ? await loadCatalog() : null;
+      if (cached) {
+        setProducts(cached);
+        setLoadError(null);
+      } else {
+        setLoadError(e instanceof Error ? e.message : 'No s’ha pogut carregar el catàleg');
+      }
     }
   }, [api]);
 
   useEffect(() => {
     void load();
+    void offlineQueue.load();
+    return offlineQueue.subscribe(setQueue);
   }, [load]);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -55,31 +72,80 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
   async function charge(wristband: WristbandRef) {
     setReading(null);
     setBusy(true);
-    pendingSaleId.current ??= newOperationId();
+    const saleId = (pendingSaleId.current ??= newOperationId());
     try {
       const res = await api.sale(
-        pendingSaleId.current,
+        saleId,
         wristband,
         lines.map(([productId, quantity]) => ({ productId, quantity })),
       );
       pendingSaleId.current = null;
       setCart({});
       setResult({ ok: true, title: formatEuros(res.movement.amountCents), detail: `Saldo restant: ${formatEuros(res.balance.availableCents)}` });
+      // Hi ha connexió: és un bon moment per enviar les vendes pendents.
+      void offlineQueue.sync(api);
     } catch (e) {
-      // Si l'error és de xarxa, potser el servidor sí que l'ha registrada: es manté l'identificador
-      // perquè el reintent no la dupliqui. Si el servidor l'ha rebutjada, se'n farà servir un de nou.
-      if (!(e instanceof ApiRequestError && e.isNetwork)) pendingSaleId.current = null;
+      if (e instanceof ApiRequestError && e.isNetwork) {
+        await chargeOffline(wristband, saleId);
+        return;
+      }
+      // El servidor l'ha rebutjada: el proper intent farà servir un identificador nou.
+      pendingSaleId.current = null;
       setResult(errorResult(e, 'No s’ha pogut cobrar'));
     } finally {
       setBusy(false);
     }
   }
 
+  /**
+   * Sense connexió: es cobra igualment si no se supera el límit (per venda i per polsera en aquest terminal).
+   * Es fa servir el mateix identificador: si la venda sí que havia arribat al servidor, no es duplicarà.
+   */
+  async function chargeOffline(wristband: WristbandRef, id: string) {
+    const pendingForWristband = offlineQueue.pendingFor(wristband);
+    if (offlineLimit <= 0 || total > offlineLimit || pendingForWristband + total > offlineLimit) {
+      setResult({
+        ok: false,
+        title: 'Sense connexió',
+        detail:
+          offlineLimit <= 0
+            ? 'En aquest esdeveniment no es pot cobrar sense connexió.'
+            : `Sense connexió només es pot cobrar fins a ${formatEuros(offlineLimit)} per polsera` +
+              (pendingForWristband > 0 ? ` (aquesta ja té ${formatEuros(pendingForWristband)} pendents)` : '') +
+              '. Torna-ho a provar.',
+      });
+      return;
+    }
+    await offlineQueue.add({
+      id,
+      wristband,
+      operatorId: session.operator.id,
+      lines: lines.map(([productId, quantity]) => ({ productId, quantity, unitPriceCents: byId.get(productId)?.priceCents ?? 0 })),
+      totalCents: total,
+      clientCreatedAt: new Date().toISOString(),
+    });
+    pendingSaleId.current = null;
+    setCart({});
+    setResult({ ok: true, warn: true, title: formatEuros(total), detail: 'Cobrat sense connexió. S’enviarà quan torni la xarxa.' });
+  }
+
   async function checkBalance(wristband: WristbandRef) {
     setReading(null);
     try {
       const balance = await api.balance(wristband);
-      setResult({ ok: balance.status === 'active', title: formatEuros(balance.availableCents), detail: balance.status === 'active' ? 'Saldo disponible' : 'Polsera bloquejada' });
+      const pending = offlineQueue.pendingFor(wristband);
+      setResult({
+        ok: balance.status === 'active' && balance.debtCents === 0,
+        title: balance.debtCents > 0 ? `Deute ${formatEuros(balance.debtCents)}` : formatEuros(balance.availableCents),
+        detail:
+          balance.status !== 'active'
+            ? 'Polsera bloquejada'
+            : balance.debtCents > 0
+              ? 'Cal recarregar a la taquilla'
+              : pending > 0
+                ? `Saldo disponible (falten ${formatEuros(pending)} de vendes pendents d’enviar)`
+                : 'Saldo disponible',
+      });
     } catch (e) {
       setResult(errorResult(e, 'No s’ha pogut consultar'));
     }
@@ -89,9 +155,16 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
     <Screen>
       <Header
         title={context.pointOfSale.name}
-        subtitle={session.operator.name}
+        subtitle={
+          queue.pending.length > 0
+            ? `${session.operator.name} · ${queue.pending.length} ${queue.pending.length === 1 ? 'venda pendent' : 'vendes pendents'} d’enviar`
+            : session.operator.name
+        }
         right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            {queue.rejected.length > 0 && (
+              <BigButton label={`⚠ ${queue.rejected.length}`} tone="danger" onPress={() => setShowRejected(true)} style={local.headerButton} />
+            )}
             {session.operator.role === 'bar_lead' && <BigButton label="Anul·la" tone="ghost" onPress={() => setShowVoids(true)} style={local.headerButton} />}
             <BigButton label="Saldo" tone="ghost" onPress={() => setReading({ purpose: 'balance' })} style={local.headerButton} />
             <BigButton label="Surt" tone="ghost" onPress={onLogout} style={local.headerButton} />
@@ -152,8 +225,49 @@ export function SellScreen({ api, context, session, onLogout }: { api: TpvApi; c
       />
 
       {showVoids && <VoidsModal api={api} onClose={() => setShowVoids(false)} onResult={setResult} />}
+      {showRejected && <RejectedModal queue={queue} onClose={() => setShowRejected(false)} />}
       <ResultOverlay result={result} onDismiss={() => setResult(null)} />
     </Screen>
+  );
+}
+
+/** Vendes sense connexió que el servidor no ha acceptat: s'han de comunicar a l'organització. */
+function RejectedModal({ queue, onClose }: { queue: QueueState; onClose: () => void }) {
+  return (
+    <Modal visible animationType="slide" onRequestClose={onClose}>
+      <Screen>
+        <Header title="Vendes no acceptades" right={<BigButton label="Tanca" tone="ghost" onPress={onClose} style={local.headerButton} />} />
+        <Text style={[ui.muted, { padding: 16 }]}>
+          Aquestes vendes es van cobrar sense connexió però el servidor no les ha acceptat. Fes una foto d’aquesta pantalla i
+          passa-la a l’organització.
+        </Text>
+        <FlatList
+          data={queue.rejected}
+          keyExtractor={(s) => s.id}
+          contentContainerStyle={{ padding: 16, gap: 10 }}
+          renderItem={({ item }) => (
+            <View style={local.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={ui.text}>
+                  {formatEuros(item.totalCents)} · {new Date(item.clientCreatedAt).toLocaleTimeString('ca-ES', { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+                <Text style={ui.muted}>{item.message}</Text>
+                <Text style={ui.muted}>Polsera {item.wristband.uid ?? item.wristband.code}</Text>
+              </View>
+            </View>
+          )}
+        />
+        <View style={{ padding: 16 }}>
+          <BigButton
+            label="Ja ho he comunicat: esborra la llista"
+            tone="ghost"
+            onPress={() => {
+              void offlineQueue.clearRejected().then(onClose);
+            }}
+          />
+        </View>
+      </Screen>
+    </Modal>
   );
 }
 

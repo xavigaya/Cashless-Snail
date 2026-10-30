@@ -1,4 +1,4 @@
-import type { Balance, EventTotals, OperationResult, PairResult, Terminal } from '@cashless/shared';
+import type { Balance, CashReport, CashShift, EventTotals, Movement, OperationResult, PairResult, Terminal } from '@cashless/shared';
 import type { RunningServer } from '../src/main';
 import { Client, createPlatformAdmin, createTestServer, newId, resetDatabase, testSql } from './helpers';
 
@@ -117,6 +117,21 @@ describe('Cashless · fase 0', () => {
   });
 
   describe('activació i recàrrega', () => {
+    it('cal obrir la caixa abans de cobrar a la taquilla', async () => {
+      const res = await boxOffice.post('/tpv/activations', { id: newId(), wristband }).expect(422);
+      expect(res.body.code).toBe('SHIFT_NOT_OPEN');
+      expect((await boxOffice.get('/tpv/shift').expect(200)).body).toBeNull();
+
+      const id = newId();
+      const shift = (await boxOffice.post('/tpv/shift/open', { id, openingFloatCents: 5000 }).expect(201)).body as CashShift;
+      expect(shift).toMatchObject({ id, operatorName: 'Pere', openingFloatCents: 5000, closedAt: null, expectedCashCents: 5000 });
+      // Reintent de la mateixa petició: el mateix torn.
+      expect((await boxOffice.post('/tpv/shift/open', { id, openingFloatCents: 5000 }).expect(201)).body.id).toBe(id);
+      const twice = await boxOffice.post('/tpv/shift/open', { id: newId(), openingFloatCents: 0 }).expect(409);
+      expect(twice.body.code).toBe('SHIFT_ALREADY_OPEN');
+      await cashier.get('/tpv/shift').expect(403);
+    });
+
     it('una polsera desconeguda no pot comprar', async () => {
       const res = await cashier.post('/tpv/sales', { id: newId(), wristband, lines: [{ productId: ids.beer, quantity: 1 }] }).expect(404);
       expect(res.body.code).toBe('WRISTBAND_NOT_FOUND');
@@ -244,6 +259,112 @@ describe('Cashless · fase 0', () => {
     });
   });
 
+  describe('vendes sense connexió', () => {
+    const offlineSale = (body: object) => barTerminal.post('/tpv/offline-sales', { operatorId: ids.cashier, clientCreatedAt: new Date().toISOString(), ...body });
+
+    it('registra la venda encara que no hi hagi saldo, i deixa deute', async () => {
+      // Saldo: 100. Dues cerveses (600) cobrades sense connexió.
+      const id = newId();
+      const res = await offlineSale({ id, wristband, lines: [{ productId: ids.beer, quantity: 2, unitPriceCents: 300 }] }).expect(201);
+      const result = res.body as OperationResult;
+      expect(result.movement).toMatchObject({ type: 'sale', amountCents: 600, offline: true, offlineIssues: ['INSUFFICIENT_BALANCE'], operatorName: 'Marc' });
+      expect(result.balance).toMatchObject({ paidCents: -500, debtCents: 500, availableCents: 0 });
+
+      const replay = await offlineSale({ id, wristband, lines: [{ productId: ids.beer, quantity: 2, unitPriceCents: 300 }] }).expect(201);
+      expect(replay.body.replayed).toBe(true);
+    });
+
+    it('amb deute no es pot comprar fins que es recarrega', async () => {
+      const denied = await cashier.post('/tpv/sales', { id: newId(), wristband, lines: [{ productId: ids.water, quantity: 1 }] }).expect(422);
+      expect(denied.body.code).toBe('WRISTBAND_IN_DEBT');
+      expect(denied.body.details).toEqual({ debtCents: 500 });
+
+      const topup = await boxOffice.post('/tpv/topups', { id: newId(), wristband, amountCents: 1000, method: 'cash' }).expect(201);
+      expect(topup.body.balance).toMatchObject({ paidCents: 500, debtCents: 0, availableCents: 500 });
+    });
+
+    it('una venda que sí que va arribar al servidor no es duplica en sincronitzar-la', async () => {
+      const id = newId();
+      await cashier.post('/tpv/sales', { id, wristband, lines: [{ productId: ids.water, quantity: 1 }] }).expect(201);
+      const sync = await offlineSale({ id, wristband, lines: [{ productId: ids.water, quantity: 1, unitPriceCents: 150 }] }).expect(201);
+      expect(sync.body.replayed).toBe(true);
+      expect(sync.body.movement.offline).toBe(false);
+      expect(sync.body.balance.paidCents).toBe(350);
+    });
+
+    it('anota les incidències: polsera desconeguda i preu canviat', async () => {
+      const res = await offlineSale({ id: newId(), wristband: { uid: '04DEADBEEF0001' }, lines: [{ productId: ids.water, quantity: 1, unitPriceCents: 100 }] }).expect(201);
+      expect(res.body.movement.amountCents).toBe(100);
+      expect(res.body.movement.offlineIssues).toEqual(['INSUFFICIENT_BALANCE', 'PRICE_CHANGED', 'WRISTBAND_NOT_ACTIVATED', 'WRISTBAND_NOT_FOUND']);
+      expect(res.body.balance.debtCents).toBe(100);
+    });
+
+    it('rebutja productes que no són del punt de venda, i operadors d’un altre esdeveniment', async () => {
+      const res = await offlineSale({ id: newId(), wristband, lines: [{ productId: ids.sandwich, quantity: 1, unitPriceCents: 450 }] }).expect(422);
+      expect(res.body.code).toBe('PRODUCT_UNAVAILABLE');
+      await offlineSale({ id: newId(), operatorId: newId(), wristband, lines: [{ productId: ids.water, quantity: 1, unitPriceCents: 150 }] }).expect(404);
+      // Cal el token del terminal.
+      await api.post('/tpv/offline-sales', {}).expect(401);
+    });
+
+    it('el backoffice pot filtrar les vendes amb incidències', async () => {
+      const res = await admin.get(`/events/${eventId}/movements?offline=issues`).expect(200);
+      expect((res.body.items as Movement[]).map((m) => m.amountCents).sort()).toEqual([100, 600]);
+    });
+  });
+
+  describe('caixa', () => {
+    let laia: Client;
+
+    beforeAll(async () => {
+      const op = (await admin.post(`/events/${eventId}/operators`, { name: 'Laia', pin: '6666', role: 'box_office' }).expect(201)).body.id;
+      laia = await loginOperator(boxTerminal, op, '6666');
+    });
+
+    it('un altre taquiller no pot cobrar dins del torn d’un company', async () => {
+      const res = await laia.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(422);
+      expect(res.body.code).toBe('SHIFT_NOT_OPEN');
+    });
+
+    it('tanca el torn comparant l’efectiu declarat amb l’esperat', async () => {
+      const open = (await laia.get('/tpv/shift').expect(200)).body as CashShift;
+      // Efectiu: polsera 100 + recàrregues 1000 + 900 + 1000. Fons: 5000.
+      expect(open).toMatchObject({ cashCents: 3000, cardCents: 0, operations: 4, expectedCashCents: 8000 });
+
+      // Relleu: la Laia compta el calaix i tanca el torn d'en Pere.
+      const closed = (await laia.post(`/tpv/shift/${open.id}/close`, { declaredCashCents: 7950, note: 'Falten 50 cèntims' }).expect(200)).body as CashShift;
+      expect(closed).toMatchObject({ expectedCashCents: 8000, declaredCashCents: 7950, differenceCents: -50, closedByName: 'Laia' });
+      const again = await laia.post(`/tpv/shift/${open.id}/close`, { declaredCashCents: 0 }).expect(409);
+      expect(again.body.code).toBe('SHIFT_CLOSED');
+
+      const res = await boxOffice.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(422);
+      expect(res.body.code).toBe('SHIFT_NOT_OPEN');
+    });
+
+    it('el backoffice veu els torns, el resum per jornada i pot tancar un torn oblidat', async () => {
+      const shiftId = newId();
+      await boxOffice.post('/tpv/shift/open', { id: shiftId, openingFloatCents: 2000 }).expect(201);
+      await boxOffice.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'card' }).expect(201);
+
+      const report = (await admin.get(`/events/${eventId}/cash`).expect(200)).body as CashReport;
+      expect(report.shifts.map((s) => [s.operatorName, s.closedAt === null, s.cardCents])).toEqual([
+        ['Pere', true, 500],
+        ['Pere', false, 0],
+      ]);
+      const box = report.daily.find((d) => d.terminalName === 'Taquilla 1')!;
+      expect(box).toMatchObject({ pointOfSaleName: 'Taquilla', cashCents: 3000, cardCents: 500, salesCents: 0 });
+      const bar = report.daily.find((d) => d.terminalName === 'Barra 1')!;
+      // Vendes netes: 1800 de les proves anteriors + 600 + 150 + 100 sense connexió.
+      expect(bar).toMatchObject({ cashCents: 0, cardCents: 0, salesCents: 2650 });
+
+      const closed = (await admin.post(`/events/${eventId}/cash/shifts/${shiftId}/close`, { declaredCashCents: 2000 }).expect(200)).body as CashShift;
+      expect(closed).toMatchObject({ expectedCashCents: 2000, differenceCents: 0, closedByName: 'Admin (backoffice)' });
+
+      // Torn nou per a la resta de proves de taquilla.
+      await boxOffice.post('/tpv/shift/open', { id: newId(), openingFloatCents: 0 }).expect(201);
+    });
+  });
+
   describe('backoffice', () => {
     it('bloqueja i desbloqueja una polsera', async () => {
       const lookup = await admin.get(`/events/${eventId}/wristbands/lookup?uid=${UID}`).expect(200);
@@ -264,16 +385,21 @@ describe('Cashless · fase 0', () => {
     it('el resum quadra amb el llibre de moviments', async () => {
       const res = await admin.get(`/events/${eventId}/summary`).expect(200);
       const totals = res.body as EventTotals;
-      // Recàrregues: 1000 + 900. Vendes vàlides: 3 × 300 + 300 (2 aigües) + 600 (2 cerveses). Anul·lades: 750.
-      expect(totals.topupsCents).toBe(1900);
-      expect(totals.topupsByMethod.cash).toBe(1900);
-      expect(totals.salesCents).toBe(1800);
-      expect(totals.salesCount).toBe(5);
+      // Recàrregues: 1000 + 900 + 1000 en efectiu i 500 amb targeta.
+      // Vendes vàlides: 3 × 300 + 300 (2 aigües) + 600 (2 cerveses) + 600 i 100 sense connexió + 150. Anul·lades: 750.
+      expect(totals.topupsCents).toBe(3400);
+      expect(totals.topupsByMethod).toEqual({ cash: 2900, card: 500, online: 0 });
+      expect(totals.salesCents).toBe(2650);
+      expect(totals.salesCount).toBe(8);
       expect(totals.voidsCents).toBe(750);
       expect(totals.wristbandFeesCents).toBe(200);
-      expect(totals.paidBalanceOutstandingCents).toBe(100);
-      expect(totals.activeWristbands).toBe(2);
-      expect(totals.salesByVendor).toEqual([{ vendorId: ids.colla, vendorName: 'Colla Castellera', salesCents: 1800, count: 5 }]);
+      // Polsera principal: 850. Polsera desconeguda: -100 (deute).
+      expect(totals.paidBalanceOutstandingCents).toBe(750);
+      expect(totals.debtOutstandingCents).toBe(100);
+      expect(totals.offlineSalesCount).toBe(2);
+      expect(totals.offlineIssuesCount).toBe(2);
+      expect(totals.activeWristbands).toBe(3);
+      expect(totals.salesByVendor).toEqual([{ vendorId: ids.colla, vendorName: 'Colla Castellera', salesCents: 2650, count: 8 }]);
 
       const movements = await admin.get(`/events/${eventId}/movements?limit=5`).expect(200);
       expect(movements.body.items).toHaveLength(5);
@@ -344,11 +470,12 @@ describe('Cashless · fase 0', () => {
       const terminal = (await admin.post(`/events/${event2}/terminals`, { name: 'Taquilla fira 1', pointOfSaleId: box2 }).expect(201))
         .body as Terminal;
       boxOffice2 = await loginOperator((await pair(terminal)).client, op, '5555');
+      await boxOffice2.post('/tpv/shift/open', { id: newId(), openingFloatCents: 0 }).expect(201);
     });
 
     it('una polsera activada en un altre esdeveniment no es pot recarregar fins que s’activa en aquest', async () => {
       const before = await boxOffice2.get(`/tpv/balance?uid=${UID}`).expect(200);
-      expect(before.body).toMatchObject({ activatedInEvent: false, paidCents: 100 });
+      expect(before.body).toMatchObject({ activatedInEvent: false, paidCents: 850 });
 
       const denied = await boxOffice2.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(422);
       expect(denied.body.code).toBe('WRISTBAND_NOT_ACTIVATED');
@@ -359,7 +486,7 @@ describe('Cashless · fase 0', () => {
 
       const topup = await boxOffice2.post('/tpv/topups', { id: newId(), wristband, amountCents: 500, method: 'cash' }).expect(201);
       // El saldo és de l'entitat: es manté el que quedava de l'altre esdeveniment.
-      expect(topup.body.balance.paidCents).toBe(600);
+      expect(topup.body.balance.paidCents).toBe(1350);
     });
 
     it('una polsera activada només en un altre esdeveniment no pot comprar en aquest', async () => {

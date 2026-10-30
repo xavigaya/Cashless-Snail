@@ -1,4 +1,4 @@
-import { MOVEMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, formatCode, type Movement } from '@cashless/shared';
+import { MOVEMENT_TYPE_LABELS, OFFLINE_ISSUE_LABELS, PAYMENT_METHOD_LABELS, formatCode, type Movement } from '@cashless/shared';
 import { api } from '../../api';
 import { Badge, ErrorBox, formatDateTime, Money, useAction } from '../../ui';
 
@@ -36,7 +36,9 @@ export function MovementTable({ eventId, items, onChanged }: { eventId: string; 
               const voidable = (m.type === 'sale' || m.type === 'topup') && !m.voidedByMovementId;
               return (
                 <tr key={m.id} style={{ opacity: m.voidedByMovementId ? 0.55 : 1 }}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(m.createdAt)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }} title={m.offline ? `Sincronitzada: ${formatDateTime(m.createdAt)}` : undefined}>
+                    {formatDateTime(m.offline && m.clientCreatedAt ? m.clientCreatedAt : m.createdAt)}
+                  </td>
                   <td>
                     {MOVEMENT_TYPE_LABELS[m.type]}
                     {m.voidedByMovementId && (
@@ -44,6 +46,17 @@ export function MovementTable({ eventId, items, onChanged }: { eventId: string; 
                         {' '}
                         <Badge tone="bad">anul·lat</Badge>
                       </>
+                    )}
+                    {m.offline && (
+                      <>
+                        {' '}
+                        <Badge tone={m.offlineIssues.length > 0 ? 'warn' : 'neutral'}>sense connexió</Badge>
+                      </>
+                    )}
+                    {m.offlineIssues.length > 0 && (
+                      <div className="muted" style={{ fontSize: '0.85em' }}>
+                        {m.offlineIssues.map((code) => OFFLINE_ISSUE_LABELS[code] ?? code).join(' · ')}
+                      </div>
                     )}
                   </td>
                   <td style={{ fontFamily: 'ui-monospace, monospace' }}>{m.wristbandCode ? formatCode(m.wristbandCode) : '—'}</td>

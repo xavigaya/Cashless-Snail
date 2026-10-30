@@ -27,6 +27,8 @@ Projecte: plataforma cashless multi-entitat per a esdeveniments. L’usuari treb
 - El saldo és per parella (polsera, entitat organitzadora).
 - El saldo promocional es gasta abans que el pagat.
 - Per recarregar o comprar, la polsera ha d’estar activada en l’esdeveniment: hi ha d’haver un moviment `wristband_fee` del seu saldo en aquell esdeveniment (`WRISTBAND_NOT_ACTIVATED` si no).
+- Excepció: les vendes sense connexió (`LedgerService.offlineSale`, `POST /tpv/offline-sales`) ja s’han cobrat, i no es rebutgen per saldo, bloqueig o activació. Es registren amb `offline = true` i els problemes a `offline_issues`. El saldo pagat pot quedar negatiu (deute); amb deute, una venda amb connexió retorna `WRISTBAND_IN_DEBT`.
+- A la taquilla, recàrregues i activacions van dins d’un torn de caixa obert de l’operador (`cash_shifts`, `movements.shift_id`; `SHIFT_NOT_OPEN` si no). Com a màxim hi ha un torn obert per terminal. `CashService` només llegeix moviments; no toca saldos.
 
 ## Esquema
 

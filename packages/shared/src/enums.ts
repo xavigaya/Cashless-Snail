@@ -95,6 +95,7 @@ export const ERROR_CODES = [
   'WRISTBAND_BLOCKED',
   'WRISTBAND_NOT_FOUND',
   'WRISTBAND_NOT_ACTIVATED',
+  'WRISTBAND_IN_DEBT',
   'EVENT_NOT_ACTIVE',
   'PRODUCT_UNAVAILABLE',
   'MAX_BALANCE_EXCEEDED',
@@ -103,6 +104,11 @@ export const ERROR_CODES = [
   'NOT_VOIDABLE',
   'FORBIDDEN_FOR_ROLE',
   'ALREADY_ACTIVATED',
+  'SHIFT_NOT_OPEN',
+  'SHIFT_ALREADY_OPEN',
+  'SHIFT_CLOSED',
+  'OVER_OFFLINE_LIMIT',
+  'PRICE_CHANGED',
   'INVALID_PIN',
   'OPERATOR_LOCKED',
   'ACCOUNT_LOCKED',
@@ -117,3 +123,16 @@ export const ERROR_CODES = [
   'INTERNAL_ERROR',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Incidències que es poden marcar en una venda feta sense connexió. */
+export const OFFLINE_ISSUE_LABELS: Partial<Record<ErrorCode, string>> = {
+  INSUFFICIENT_BALANCE: 'Saldo insuficient (deute)',
+  WRISTBAND_IN_DEBT: 'La polsera ja tenia deute',
+  WRISTBAND_BLOCKED: 'Polsera bloquejada',
+  WRISTBAND_NOT_FOUND: 'Polsera desconeguda',
+  WRISTBAND_NOT_ACTIVATED: 'Polsera no activada',
+  EVENT_NOT_ACTIVE: 'Esdeveniment no actiu',
+  OVER_OFFLINE_LIMIT: 'Supera el límit sense connexió',
+  PRICE_CHANGED: 'Preu diferent de l’actual',
+  PRODUCT_UNAVAILABLE: 'Producte desactivat',
+};

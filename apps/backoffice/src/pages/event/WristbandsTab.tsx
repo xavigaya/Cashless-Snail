@@ -77,6 +77,15 @@ export function WristbandsTab() {
                 <Money cents={result.balance.paidCents} />
               </div>
             </div>
+            {result.balance.debtCents > 0 && (
+              <div className="stat">
+                <div className="stat-label">Deute</div>
+                <div className="stat-value" style={{ color: 'var(--bad)' }}>
+                  <Money cents={result.balance.debtCents} />
+                </div>
+                <div className="muted">Vendes sense connexió sense saldo: no pot comprar fins que recarregui</div>
+              </div>
+            )}
             <div className="stat">
               <div className="stat-label">Saldo promocional</div>
               <div className="stat-value">

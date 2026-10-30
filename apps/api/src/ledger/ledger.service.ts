@@ -12,7 +12,10 @@ import {
   mergeLines,
   priceLines,
   splitDebit,
+  splitDebitAllowingDebt,
   type ActivationInput,
+  type ErrorCode,
+  type OfflineSaleInput,
   type ActivationResult,
   type Balance,
   type MovementType,
@@ -27,6 +30,7 @@ import { deriveUuid, generateWristbandCode, sha256, stableStringify } from '../c
 import { conflict, DomainError, forbidden, notFound, unprocessable } from '../common/errors';
 import { isUniqueViolation, type Db, type Queryable, type Tx } from '../db/db';
 import {
+  cashShifts,
   movementLines,
   movements,
   products,
@@ -46,6 +50,8 @@ export interface OperationContext {
   terminalId: string | null;
   operatorId: string | null;
   adminUserId: string | null;
+  /** Torn de caixa obert de l'operador (taquilles). Si s'indica, ha de seguir obert. */
+  shiftId?: string | null;
 }
 
 export interface VoidConstraints {
@@ -69,6 +75,8 @@ interface NewMovement {
   vendorId?: string | null;
   pointOfSaleId?: string | null;
   clientCreatedAt?: Date;
+  offline?: boolean;
+  offlineIssues?: ErrorCode[];
 }
 
 export class LedgerService {
@@ -133,6 +141,11 @@ export class LedgerService {
       const wallet = await this.lockWallet(tx, wristband.id, ctx.event.organizationId, false);
       this.assertWalletActive(wallet);
       await this.assertActivated(tx, wallet, ctx);
+      if (wallet && wallet.paidCents < 0) {
+        throw unprocessable('WRISTBAND_IN_DEBT', 'La polsera té un deute d’una venda sense connexió: cal recarregar-la a la taquilla', {
+          debtCents: -wallet.paidCents,
+        });
+      }
       const split = splitDebit(priced.totalCents, wallet?.promoCents ?? 0, wallet?.paidCents ?? 0);
       if (!wallet || !split) {
         throw unprocessable('INSUFFICIENT_BALANCE', 'Saldo insuficient', {
@@ -159,6 +172,94 @@ export class LedgerService {
   }
 
   // ---------------------------------------------------------------
+  // Venda feta sense connexió
+  // ---------------------------------------------------------------
+
+  /**
+   * Registra una venda que el terminal ja va cobrar sense connexió. El producte ja s'ha lliurat,
+   * així que no es rebutja per saldo, bloqueig o activació: es registra amb el preu cobrat,
+   * el saldo pot quedar negatiu (deute) i s'anoten les incidències perquè l'organització les revisi.
+   * Només es rebutja si els productes no són d'aquest punt de venda (dades incorrectes).
+   */
+  async offlineSale(ctx: OperationContext, input: OfflineSaleInput): Promise<OperationResult> {
+    const lines = mergeLines(input.lines).sort((a, b) => (a.productId < b.productId ? -1 : 1));
+    // El mateix hash que una venda amb connexió: si la venda sí que va arribar al servidor
+    // (però el terminal no en va rebre la resposta), la sincronització en retorna el resultat.
+    const requestHash = this.hash({
+      type: 'sale',
+      eventId: ctx.event.id,
+      wristband: input.wristband,
+      lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+    });
+
+    return this.idempotent(input.id, requestHash, (tx) => this.replaySingle(tx, input.id, ctx), async (tx) => {
+      if (!ctx.vendorId) throw forbidden('Aquest punt de venda no pot vendre productes');
+      const issues = new Set<ErrorCode>();
+      if (ctx.event.status !== 'active') issues.add('EVENT_NOT_ACTIVE');
+
+      const productRows = await tx
+        .select()
+        .from(products)
+        .where(
+          and(
+            inArray(
+              products.id,
+              lines.map((l) => l.productId),
+            ),
+            eq(products.eventId, ctx.event.id),
+            eq(products.vendorId, ctx.vendorId),
+          ),
+        );
+      const productById = new Map(productRows.map((p) => [p.id, p]));
+      const missing = lines.filter((l) => !productById.has(l.productId)).map((l) => l.productId);
+      if (missing.length > 0) {
+        throw unprocessable('PRODUCT_UNAVAILABLE', 'Algun producte no és d’aquest punt de venda', { productIds: missing });
+      }
+      const priced = priceLines(
+        lines.map((l) => {
+          const p = productById.get(l.productId)!;
+          if (!p.active) issues.add('PRODUCT_UNAVAILABLE');
+          if (p.priceCents !== l.unitPriceCents) issues.add('PRICE_CHANGED');
+          return { productId: p.id, name: p.name, quantity: l.quantity, unitPriceCents: l.unitPriceCents, vatRateBps: p.vatRateBps };
+        }),
+      );
+      if (priced.totalCents > ctx.event.offlineSaleLimitCents) issues.add('OVER_OFFLINE_LIMIT');
+
+      if (!(await this.findWristband(tx, input.wristband))) issues.add('WRISTBAND_NOT_FOUND');
+      const wristband = await this.findOrCreateWristband(tx, input.wristband);
+      if (wristband.status !== 'active') issues.add('WRISTBAND_BLOCKED');
+      const wallet = (await this.lockWallet(tx, wristband.id, ctx.event.organizationId, true))!;
+      if (wallet.status !== 'active') issues.add('WRISTBAND_BLOCKED');
+      if (!(await isActivatedInEvent(tx, wallet.id, ctx.event.id))) issues.add('WRISTBAND_NOT_ACTIVATED');
+      if (wallet.paidCents < 0) issues.add('WRISTBAND_IN_DEBT');
+
+      const split = splitDebitAllowingDebt(priced.totalCents, wallet.promoCents);
+      if (wallet.paidCents < split.paidCents) issues.add('INSUFFICIENT_BALANCE');
+
+      const updated = await this.applyDeltas(tx, wallet, { paid: -split.paidCents, promo: -split.promoCents });
+      await this.insertMovement(tx, ctx, wallet, {
+        id: input.id,
+        requestHash,
+        type: 'sale',
+        paymentMethod: 'wallet',
+        amountCents: priced.totalCents,
+        paidDeltaCents: -split.paidCents,
+        promoDeltaCents: -split.promoCents,
+        clientCreatedAt: input.clientCreatedAt,
+        offline: true,
+        offlineIssues: [...issues].sort(),
+      });
+      await tx.insert(movementLines).values(priced.lines.map((l) => ({ movementId: input.id, ...l })));
+
+      return {
+        movement: await loadMovement(tx, input.id),
+        balance: toBalance(wristband, updated, !issues.has('WRISTBAND_NOT_ACTIVATED')),
+        replayed: false,
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------
   // Recàrrega
   // ---------------------------------------------------------------
 
@@ -173,6 +274,7 @@ export class LedgerService {
 
     return this.idempotent(input.id, requestHash, (tx) => this.replaySingle(tx, input.id, ctx), async (tx) => {
       this.assertEventActive(ctx.event);
+      await this.assertShiftOpen(tx, ctx);
       const wristband = await this.requireActiveWristband(tx, input.wristband);
       const wallet = (await this.lockWallet(tx, wristband.id, ctx.event.organizationId, true))!;
       this.assertWalletActive(wallet);
@@ -218,6 +320,7 @@ export class LedgerService {
 
     return this.idempotent(input.id, requestHash, replay, async (tx) => {
       this.assertEventActive(ctx.event);
+      await this.assertShiftOpen(tx, ctx);
       const wristband = await this.findOrCreateWristband(tx, input.wristband);
       if (wristband.status !== 'active') {
         throw unprocessable('WRISTBAND_BLOCKED', 'Aquesta polsera està bloquejada');
@@ -288,7 +391,9 @@ export class LedgerService {
 
       const [wallet] = await tx.select().from(wallets).where(eq(wallets.id, target.walletId)).for('update');
       const deltas = { paid: -target.paidDeltaCents, promo: -target.promoDeltaCents, deposit: -target.depositDeltaCents };
-      if (wallet!.paidCents + deltas.paid < 0 || wallet!.promoCents + deltas.promo < 0 || wallet!.depositCents + deltas.deposit < 0) {
+      // Només es comprova el que disminueix: anul·lar una venda d'una polsera amb deute sempre és possible.
+      const goesNegative = (current: number, delta: number) => delta < 0 && current + delta < 0;
+      if (goesNegative(wallet!.paidCents, deltas.paid) || goesNegative(wallet!.promoCents, deltas.promo) || goesNegative(wallet!.depositCents, deltas.deposit)) {
         throw unprocessable('INSUFFICIENT_BALANCE', 'No hi ha prou saldo per anul·lar aquest moviment: ja s’ha gastat');
       }
 
@@ -395,6 +500,21 @@ export class LedgerService {
     return { movement, balance: await loadBalance(tx, wristband, ctx.event), replayed: true };
   }
 
+  /** Les operacions de caixa s'han de fer dins d'un torn obert. El bloqueig evita tancar el torn a mitja operació. */
+  private async assertShiftOpen(tx: Tx, ctx: OperationContext): Promise<void> {
+    if (ctx.shiftId === undefined) return;
+    const [shift] = ctx.shiftId
+      ? await tx
+          .select({ closedAt: cashShifts.closedAt })
+          .from(cashShifts)
+          .where(eq(cashShifts.id, ctx.shiftId))
+          .for('share')
+      : [];
+    if (!shift || shift.closedAt) {
+      throw unprocessable('SHIFT_NOT_OPEN', 'Cal obrir la caixa abans de cobrar');
+    }
+  }
+
   private assertEventActive(event: EventRow): void {
     if (event.status !== 'active') {
       throw unprocessable('EVENT_NOT_ACTIVE', 'L’esdeveniment no està actiu');
@@ -473,6 +593,9 @@ export class LedgerService {
       reason: m.reason ?? null,
       requestHash: m.requestHash,
       clientCreatedAt: m.clientCreatedAt ?? null,
+      offline: m.offline ?? false,
+      offlineIssues: m.offlineIssues ?? [],
+      shiftId: ctx.shiftId ?? null,
     });
   }
 }

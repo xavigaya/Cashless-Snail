@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatEuros, parseEuros, vatIncluded } from './money.ts';
-import { mergeLines, priceLines, splitDebit } from './pricing.ts';
+import { mergeLines, priceLines, splitDebit, splitDebitAllowingDebt } from './pricing.ts';
 import {
   codeFromRandomBytes,
   isValidCode,
@@ -71,4 +71,10 @@ test('identificació de polseres', () => {
   const pairing = parsePairingQr(pairingQrPayload('https://api.exemple.cat', 'K7P2M9QX'));
   assert.deepEqual(pairing, { type: 'cashless-pairing', apiUrl: 'https://api.exemple.cat', code: 'K7P2M9QX' });
   assert.equal(parsePairingQr('{"type":"altre"}'), null);
+});
+
+test('sense connexió: es gasta el promocional i la resta pot deixar deute', () => {
+  assert.deepEqual(splitDebitAllowingDebt(600, 0), { promoCents: 0, paidCents: 600 });
+  assert.deepEqual(splitDebitAllowingDebt(600, 200), { promoCents: 200, paidCents: 400 });
+  assert.deepEqual(splitDebitAllowingDebt(150, 500), { promoCents: 150, paidCents: 0 });
 });

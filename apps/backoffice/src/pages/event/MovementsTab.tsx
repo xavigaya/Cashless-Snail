@@ -10,6 +10,7 @@ const PAGE_SIZE = 50;
 export function MovementsTab() {
   const { event } = useEventContext();
   const [type, setType] = useState<MovementType | ''>('');
+  const [offline, setOffline] = useState<'' | 'offline' | 'issues'>('');
   const [items, setItems] = useState<Movement[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,6 +22,7 @@ export function MovementsTab() {
       try {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
         if (type) params.set('type', type);
+        if (offline) params.set('offline', offline);
         if (after) params.set('cursor', after);
         const page = await api.get<Page<Movement>>(`/events/${event.id}/movements?${params}`);
         setItems((prev) => (after ? [...prev, ...page.items] : page.items));
@@ -32,7 +34,7 @@ export function MovementsTab() {
         setLoading(false);
       }
     },
-    [event.id, type],
+    [event.id, type, offline],
   );
 
   useEffect(() => {
@@ -52,6 +54,13 @@ export function MovementsTab() {
                   {MOVEMENT_TYPE_LABELS[t]}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Sense connexió">
+            <select value={offline} onChange={(e) => setOffline(e.target.value as '' | 'offline' | 'issues')}>
+              <option value="">Tots</option>
+              <option value="offline">Vendes sense connexió</option>
+              <option value="issues">Amb incidències</option>
             </select>
           </Field>
           <button onClick={() => void load(null)}>Actualitza</button>

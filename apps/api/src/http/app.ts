@@ -14,6 +14,7 @@ import { rateLimit } from '../common/rate-limit';
 import type { Db } from '../db/db';
 import { LedgerService } from '../ledger/ledger.service';
 import { AdminAccess } from '../admin/admin-access';
+import { CashService } from '../cash/cash.service';
 import { TERMINAL_TOKEN_HEADER } from './auth-middleware';
 import type { AppDeps, AppEnv } from './context';
 import { authRoutes } from './routes/auth';
@@ -40,6 +41,7 @@ export function createApi(options: CreateAppOptions): Hono<AppEnv> {
     config: options.config,
     ledger: new LedgerService(options.db),
     access: new AdminAccess(options.db),
+    cash: new CashService(options.db),
     clientIp: options.clientIp,
   };
   const api = new Hono<AppEnv>(ROUTER_OPTIONS);

@@ -11,6 +11,7 @@ import { CatalogTab } from './pages/event/CatalogTab';
 import { StaffTab } from './pages/event/StaffTab';
 import { MovementsTab } from './pages/event/MovementsTab';
 import { WristbandsTab } from './pages/event/WristbandsTab';
+import { CashTab } from './pages/event/CashTab';
 import './styles.css';
 
 function Shell() {
@@ -51,6 +52,7 @@ const router = createBrowserRouter([
           { path: 'staff', element: <StaffTab /> },
           { path: 'movements', element: <MovementsTab /> },
           { path: 'wristbands', element: <WristbandsTab /> },
+          { path: 'cash', element: <CashTab /> },
         ],
       },
       { path: '*', element: <Navigate to="/" replace /> },

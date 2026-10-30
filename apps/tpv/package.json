@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@cashless/shared": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.0",
     "expo-build-properties": "~1.0.10",
     "expo-camera": "~17.0.0",

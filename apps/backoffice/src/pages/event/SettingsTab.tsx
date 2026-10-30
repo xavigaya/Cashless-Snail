@@ -13,6 +13,7 @@ export function SettingsTab() {
   const [price, setPrice] = useState<number | null>(event.wristbandPriceCents);
   const [deposit, setDeposit] = useState<number | null>(event.wristbandDepositCents);
   const [maxBalance, setMaxBalance] = useState<number | null>(event.maxBalanceCents);
+  const [offlineLimit, setOfflineLimit] = useState<number | null>(event.offlineSaleLimitCents);
   const [saved, setSaved] = useState(false);
   const { error, busy, run } = useAction();
 
@@ -33,6 +34,7 @@ export function SettingsTab() {
               wristbandPriceCents: price ?? 0,
               wristbandDepositCents: deposit ?? 0,
               maxBalanceCents: maxBalance ?? event.maxBalanceCents,
+              offlineSaleLimitCents: offlineLimit ?? 0,
             }),
           );
           if (ok) {
@@ -67,6 +69,12 @@ export function SettingsTab() {
         </Field>
         <Field label="Saldo màxim per polsera (€)">
           <MoneyInput cents={maxBalance} onChange={setMaxBalance} required />
+        </Field>
+        <Field
+          label="Límit sense connexió (€)"
+          hint="Si una barra perd la xarxa, pot cobrar fins a aquest import per venda i per polsera. Si el saldo no arribava, la polsera queda amb deute. 0 = no es cobra sense connexió."
+        >
+          <MoneyInput cents={offlineLimit} onChange={setOfflineLimit} />
         </Field>
       </Form>
       {saved && <p className="muted">Canvis desats.</p>}
