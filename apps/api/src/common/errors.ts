@@ -1,6 +1,6 @@
 import type { ZodType, ZodTypeDef } from 'zod';
 import type { ApiError, ErrorCode } from '@cashless/shared';
-import { isUniqueViolation } from '../db/db';
+import { isForeignKeyViolation, isUniqueViolation } from '../db/db';
 
 /** Error de negoci amb un codi estable que els clients poden interpretar. */
 export class DomainError extends Error {
@@ -20,6 +20,23 @@ export const forbidden = (message = 'No tens permís per fer aquesta acció') =>
 export const unauthorized = (message = 'Cal iniciar sessió') => new DomainError('UNAUTHORIZED', message, 401);
 export const unprocessable = (code: ErrorCode, message: string, details?: unknown) => new DomainError(code, message, 422, details);
 export const conflict = (code: ErrorCode, message: string, details?: unknown) => new DomainError(code, message, 409, details);
+/**
+ * Esborra un element. Si altres dades en depenen (moviments, productes, terminals…), no es pot:
+ * s'ha de desactivar perquè la història quedi intacta.
+ */
+export async function deleteOrConflict(what: string, remove: () => Promise<number>): Promise<void> {
+  let deleted: number;
+  try {
+    deleted = await remove();
+  } catch (error) {
+    if (isForeignKeyViolation(error)) {
+      throw conflict('CONFLICT', `No es pot esborrar: ${what} ja té moviments o altres dades que en depenen. Desactiva’l en lloc d’esborrar-lo.`);
+    }
+    throw error;
+  }
+  if (deleted === 0) throw notFound(what.charAt(0).toUpperCase() + what.slice(1));
+}
+
 export const badRequest = (message: string, details?: unknown) => new DomainError('VALIDATION_ERROR', message, 400, details);
 
 /**

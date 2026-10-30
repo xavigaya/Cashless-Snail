@@ -23,6 +23,7 @@ import { eventRoutes } from './routes/events';
 import { organizationRoutes } from './routes/organizations';
 import { staffRoutes } from './routes/staff';
 import { tpvRoutes } from './routes/tpv';
+import { bulkRoutes } from './routes/bulk';
 
 const MAX_BODY_BYTES = 100 * 1024;
 // Com abans (Express): /events i /events/ són la mateixa ruta.
@@ -96,6 +97,7 @@ export function createApi(options: CreateAppOptions): Hono<AppEnv> {
   api.route('/', catalogRoutes(deps));
   api.route('/', staffRoutes(deps));
   api.route('/', tpvRoutes(deps));
+  api.route('/', bulkRoutes(deps));
 
   attachErrorHandlers(api);
   return api;

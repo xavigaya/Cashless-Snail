@@ -1,4 +1,4 @@
-import type { Balance, CashReport, CashShift, EventTotals, Movement, OperationResult, PairResult, Terminal } from '@cashless/shared';
+import type { Balance, CashReport, CashShift, EventTotals, Movement, OperationResult, Page, PairResult, Terminal, WristbandSummary } from '@cashless/shared';
 import type { RunningServer } from '../src/main';
 import { Client, createPlatformAdmin, createTestServer, newId, resetDatabase, testSql } from './helpers';
 
@@ -517,6 +517,108 @@ describe('Cashless · fase 0', () => {
       await boxOffice2.post('/tpv/topups', { id: newId(), wristband: { uid: OTHER_UID }, amountCents: 1000, method: 'cash' }).expect(201);
       const res = await cashier.post('/tpv/sales', { id: newId(), wristband: { uid: OTHER_UID }, lines: [{ productId: ids.water, quantity: 1 }] }).expect(422);
       expect(res.body.code).toBe('WRISTBAND_NOT_ACTIVATED');
+    });
+  });
+
+  describe('edició, importació i llista de polseres', () => {
+    const e = () => `/events/${eventId}`;
+
+    it('esborra el que no té moviments, i refusa esborrar el que en té', async () => {
+      const temp = (await admin.post(`${e()}/products`, { vendorId: ids.colla, name: 'Provisional', priceCents: 100 }).expect(201)).body.id;
+      await admin.delete(`${e()}/products/${temp}`).expect(204);
+      await admin.delete(`${e()}/products/${temp}`).expect(404);
+
+      const used = await admin.delete(`${e()}/products/${ids.beer}`).expect(409);
+      expect(used.body.code).toBe('CONFLICT');
+      await admin.delete(`${e()}/vendors/${ids.colla}`).expect(409);
+      await admin.delete(`${e()}/operators/${ids.cashier}`).expect(409);
+      await admin.delete(`${e()}/points-of-sale/${ids.bar}`).expect(409);
+    });
+
+    it('edita el venedor d’una barra, però no el d’una taquilla', async () => {
+      await admin.patch(`${e()}/points-of-sale/${ids.bar}`, { vendorId: ids.ampa }).expect(200);
+      await admin.patch(`${e()}/points-of-sale/${ids.bar}`, { vendorId: ids.colla, name: 'Barra' }).expect(200);
+      await admin.patch(`${e()}/points-of-sale/${ids.box}`, { vendorId: ids.ampa }).expect(422);
+    });
+
+    it('importa en bloc: crea el que és nou i actualitza pel nom', async () => {
+      const vendors = await admin
+        .post(`${e()}/import/vendors`, { rows: [{ name: 'colla castellera', commissionBps: 300 }, { name: 'Esplai', commissionBps: 0 }] })
+        .expect(200);
+      expect(vendors.body).toEqual({ created: 1, updated: 1, unchanged: 0 });
+
+      const pos = await admin
+        .post(`${e()}/import/points-of-sale`, { rows: [{ name: 'Barra Esplai', kind: 'bar', vendorName: 'ESPLAI' }, { name: 'Taquilla 2', kind: 'box_office' }] })
+        .expect(200);
+      expect(pos.body.created).toBe(2);
+
+      const products = await admin
+        .post(`${e()}/import/products`, {
+          rows: [
+            { vendorName: 'Esplai', name: 'Crispetes', priceCents: 200, category: 'Menjar' },
+            { vendorName: 'Colla Castellera', name: 'cervesa', priceCents: 350 },
+          ],
+        })
+        .expect(200);
+      expect(products.body).toEqual({ created: 1, updated: 1, unchanged: 0 });
+      const beer = (await admin.get(`${e()}/products`).expect(200)).body.find((p: { id: string }) => p.id === ids.beer);
+      expect(beer.priceCents).toBe(350);
+
+      const ops = await admin
+        .post(`${e()}/import/operators`, { rows: [{ name: 'Jordi', role: 'waiter', pin: '7777' }, { name: 'Marc', role: 'cashier' }] })
+        .expect(200);
+      expect(ops.body).toEqual({ created: 1, updated: 1, unchanged: 0 });
+
+      const terms = await admin.post(`${e()}/import/terminals`, { rows: [{ name: 'Barra Esplai 1', pointOfSaleName: 'Barra Esplai' }] }).expect(200);
+      expect(terms.body.created).toBe(1);
+      const created = (await admin.get(`${e()}/terminals`).expect(200)).body.find((t: Terminal) => t.name === 'Barra Esplai 1');
+      expect(created.pairingCode).toMatch(/^[2-9A-Z]{8}$/);
+    });
+
+    it('una importació amb errors no deixa res a mitges', async () => {
+      const res = await admin
+        .post(`${e()}/import/products`, {
+          rows: [
+            { vendorName: 'Esplai', name: 'Xocolata', priceCents: 150 },
+            { vendorName: 'No existeix', name: 'Res', priceCents: 100 },
+          ],
+        })
+        .expect(400);
+      expect(res.body.message).toMatch(/^Fila 3:/);
+      const names = (await admin.get(`${e()}/products`).expect(200)).body.map((p: { name: string }) => p.name);
+      expect(names).not.toContain('Xocolata');
+
+      const noPin = await admin.post(`${e()}/import/operators`, { rows: [{ name: 'Nova', role: 'cashier' }] }).expect(400);
+      expect(noPin.body.message).toMatch(/PIN/);
+    });
+
+    it('registra polseres per endavant sense duplicar-les', async () => {
+      const res = await admin
+        .post(`${e()}/import/wristbands`, { rows: [{ uid: '04:11:22:33:44:55:66' }, { code: 'QWERT-ZXPAS' }, { uid: UID }] })
+        .expect(200);
+      expect(res.body).toEqual({ created: 2, updated: 0, unchanged: 1 });
+      const again = await admin.post(`${e()}/import/wristbands`, { rows: [{ code: 'QWERTZXPAS', uid: '04AABBCCDDEE01' }] }).expect(200);
+      expect(again.body).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    });
+
+    it('llista les polseres de l’esdeveniment i les busca per codi o UID', async () => {
+      const all = (await admin.get(`${e()}/wristbands`).expect(200)).body as Page<WristbandSummary>;
+      // La principal, la del QR i la desconeguda de la venda sense connexió. Les registrades per endavant no hi surten.
+      expect(all.items).toHaveLength(3);
+      const main = all.items.find((w) => w.uid === UID)!;
+      expect(main).toMatchObject({ activatedInEvent: true, availableCents: 1200, debtCents: 0 }); // el saldo inclou el de l’altre esdeveniment
+      expect(main.movementsCount).toBeGreaterThan(10);
+
+      const byCode = (await admin.get(`${e()}/wristbands?q=abcde-f`).expect(200)).body as Page<WristbandSummary>;
+      expect(byCode.items.map((w) => w.code)).toEqual(['ABCDEFGHJK']);
+      const byUid = (await admin.get(`${e()}/wristbands?q=deadbeef`).expect(200)).body as Page<WristbandSummary>;
+      expect(byUid.items[0]).toMatchObject({ debtCents: 100, activatedInEvent: false });
+
+      const page = (await admin.get(`${e()}/wristbands?limit=2`).expect(200)).body as Page<WristbandSummary>;
+      expect(page.items).toHaveLength(2);
+      const rest = (await admin.get(`${e()}/wristbands?limit=2&offset=${page.nextCursor}`).expect(200)).body as Page<WristbandSummary>;
+      expect(rest.items).toHaveLength(1);
+      expect(rest.nextCursor).toBeNull();
     });
   });
 

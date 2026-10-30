@@ -82,4 +82,8 @@ export class Client {
   patch(path: string, body: object = {}) {
     return request(this.baseUrl).patch(path).set(this.headers).send(body);
   }
+
+  delete(path: string) {
+    return request(this.baseUrl).delete(path).set(this.headers);
+  }
 }

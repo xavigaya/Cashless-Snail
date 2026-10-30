@@ -1,6 +1,6 @@
 /** Components bàsics de la interfície del terminal. */
 import { useEffect, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { colors, sizes } from './theme';
@@ -13,9 +13,22 @@ export function Screen({ children }: { children: ReactNode }) {
   );
 }
 
+const BADGE = require('../assets/logo-insignia.png') as number;
+
+/** Logo de Cashless Snail: insígnia (cargol amb la closca sense contacte) i nom. */
+export function Brand({ size = 40, showName = true }: { size?: number; showName?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.3 }} accessibilityRole="header" accessibilityLabel="Cashless Snail">
+      <Image source={BADGE} style={{ width: size, height: size }} />
+      {showName && <Text style={[styles.brandName, { fontSize: size * 0.55 }]}>cashless snail</Text>}
+    </View>
+  );
+}
+
 export function Header({ title, subtitle, right }: { title: string; subtitle?: string; right?: ReactNode }) {
   return (
     <View style={styles.header}>
+      <Image source={BADGE} style={{ width: 34, height: 34 }} accessibilityIgnoresInvertColors />
       <View style={{ flex: 1 }}>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
@@ -155,8 +168,10 @@ export const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
+    backgroundColor: colors.brand,
   },
   headerTitle: { color: colors.ink, fontSize: 20, fontWeight: '700' },
+  brandName: { color: colors.ink, fontWeight: '800', letterSpacing: -0.5 },
   muted: { color: colors.muted, fontSize: 15 },
   text: { color: colors.ink, fontSize: sizes.text },
   title: { color: colors.ink, fontSize: sizes.title, fontWeight: '700' },

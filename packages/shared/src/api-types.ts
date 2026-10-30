@@ -264,6 +264,20 @@ export interface CashReport {
   daily: CashDailyRow[];
 }
 
+export interface ImportResult {
+  created: number;
+  updated: number;
+  /** Files que ja existien i no han canviat (p. ex. polseres ja registrades). */
+  unchanged: number;
+}
+
+/** Fila de la llista de polseres d'un esdeveniment. */
+export interface WristbandSummary extends Balance {
+  uid: string | null;
+  movementsCount: number;
+  lastMovementAt: string;
+}
+
 export interface Page<T> {
   items: T[];
   nextCursor: string | null;

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Cashless TPV",
+    "name": "Cashless Snail",
     "slug": "cashless-tpv",
     "version": "0.1.0",
     "orientation": "default",
@@ -18,7 +18,11 @@
       "permissions": [
         "android.permission.NFC",
         "android.permission.CAMERA"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#C8F03C"
+      }
     },
     "plugins": [
       [
@@ -44,6 +48,8 @@
           }
         }
       ]
-    ]
+    ],
+    "icon": "./assets/icon.png",
+    "backgroundColor": "#0B1F19"
   }
 }

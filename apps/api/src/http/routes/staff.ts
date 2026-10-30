@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { and, asc, eq } from 'drizzle-orm';
 import { createOperatorSchema, createTerminalSchema, updateOperatorSchema, updateTerminalSchema } from '@cashless/shared';
 import { generatePairingCode, hashSecret } from '../../common/crypto';
-import { notFound, parseInput, parseUuid, unprocessable } from '../../common/errors';
+import { deleteOrConflict, notFound, parseInput, parseUuid, unprocessable } from '../../common/errors';
 import { operators, pointsOfSale, terminals } from '../../db/schema';
 import { toOperator, toTerminal } from '../../admin/mappers';
 import { authMiddleware } from '../auth-middleware';
@@ -11,7 +11,7 @@ import { readJson, type AppDeps, type AppEnv } from '../context';
 
 const PAIRING_MINUTES = 30;
 
-function newPairing(): { pairingCode: string; pairingExpiresAt: Date } {
+export function newPairing(): { pairingCode: string; pairingExpiresAt: Date } {
   return { pairingCode: generatePairingCode(), pairingExpiresAt: new Date(Date.now() + PAIRING_MINUTES * 60_000) };
 }
 
@@ -64,6 +64,18 @@ export function staffRoutes(deps: AppDeps) {
     return c.json(toOperator(row));
   });
 
+  app.delete('/events/:eventId/operators/:operatorId', requireAdmin, async (c) => {
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    const operatorId = parseUuid(c.req.param('operatorId'), 'operatorId');
+    await access.event(c.get('admin'), eventId);
+    await deleteOrConflict('l’operador', async () => {
+      const rows = await db.delete(operators).where(and(eq(operators.id, operatorId), eq(operators.eventId, eventId))).returning({ id: operators.id });
+      return rows.length;
+    });
+    await access.audit(db, c.get('admin'), { eventId, action: 'operator.delete', targetType: 'operator', targetId: operatorId });
+    return c.body(null, 204);
+  });
+
   // ---------- Terminals ----------
 
   app.get('/events/:eventId/terminals', requireAdmin, async (c) => {
@@ -102,6 +114,18 @@ export function staffRoutes(deps: AppDeps) {
       await access.audit(db, c.get('admin'), { eventId, action: 'terminal.disable', targetType: 'terminal', targetId: terminalId });
     }
     return c.json(toTerminal(row));
+  });
+
+  app.delete('/events/:eventId/terminals/:terminalId', requireAdmin, async (c) => {
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    const terminalId = parseUuid(c.req.param('terminalId'), 'terminalId');
+    await access.event(c.get('admin'), eventId);
+    await deleteOrConflict('el terminal', async () => {
+      const rows = await db.delete(terminals).where(and(eq(terminals.id, terminalId), eq(terminals.eventId, eventId))).returning({ id: terminals.id });
+      return rows.length;
+    });
+    await access.audit(db, c.get('admin'), { eventId, action: 'terminal.delete', targetType: 'terminal', targetId: terminalId });
+    return c.body(null, 204);
   });
 
   /**

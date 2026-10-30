@@ -1,7 +1,9 @@
 # Documentació
 
 - **[Com provar-ho tot](com-provar.md)**: instal·lació, app al mòbil i recorregut de prova
+- **[Importar i exportar](importar-exportar.md)**: fitxers CSV per a venedors, productes, operadors, terminals i polseres; editar i esborrar
 - **[Caixa i vendes sense connexió](caixa-i-offline.md)**: com funcionen i com es configuren (fase 1)
+- **[Marca](marca/README.md)**: logo, colors i tipografia
 - **[Versió online gratuïta amb Supabase](supabase.md)**: base de dades i API a Supabase, backoffice a GitHub Pages
 - **[Desplegament 100% online amb Render](desplegament.md)**: opció de pagament, compilació de l’app al núvol i proves a GitHub
 - **Especificacions del sistema** (decisions, arquitectura, model de dades, fases i punts legals a validar):

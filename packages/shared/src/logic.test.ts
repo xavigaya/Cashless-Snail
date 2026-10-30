@@ -78,3 +78,25 @@ test('sense connexió: es gasta el promocional i la resta pot deixar deute', () 
   assert.deepEqual(splitDebitAllowingDebt(600, 200), { promoCents: 200, paidCents: 400 });
   assert.deepEqual(splitDebitAllowingDebt(150, 500), { promoCents: 150, paidCents: 0 });
 });
+
+test('CSV: llegeix punt i coma, cometes i accents, i reconeix les capçaleres', async () => {
+  const { csvRecords, parseCsv, toCsv, matchOption, parseYesNo, parsePercentBps } = await import('./csv.ts');
+  const { POS_KIND_LABELS } = await import('./enums.ts');
+  const text = '﻿Nom;Comissió (%);Punt de venda\r\n"Colla; castellera";2,5;"Barra ""gran"""\r\n\r\nEsplai;0;\r\n';
+  assert.deepEqual(csvRecords(text), [
+    { nom: 'Colla; castellera', comissio: '2,5', punt_de_venda: 'Barra "gran"' },
+    { nom: 'Esplai', comissio: '0', punt_de_venda: '' },
+  ]);
+  assert.deepEqual(parseCsv('a,b\n1,2'), [['a', 'b'], ['1', '2']]);
+  const out = toCsv(['Nom', 'Actiu'], [['A;B', true], ['C"D', false]]);
+  assert.equal(out, '﻿Nom;Actiu\r\n"A;B";sí\r\n"C""D";no\r\n');
+  assert.deepEqual(csvRecords(out), [{ nom: 'A;B', actiu: 'sí' }, { nom: 'C"D', actiu: 'no' }]);
+  assert.equal(matchOption('taquilla', POS_KIND_LABELS), 'box_office');
+  assert.equal(matchOption('KITCHEN', POS_KIND_LABELS), 'kitchen');
+  assert.equal(matchOption('bar ', POS_KIND_LABELS), 'bar');
+  assert.equal(matchOption('cafeteria', POS_KIND_LABELS), null);
+  assert.equal(parseYesNo('Sí', false), true);
+  assert.equal(parseYesNo('', true), true);
+  assert.equal(parseYesNo('potser', true), null);
+  assert.equal(parsePercentBps('10,5 %'), 1050);
+});

@@ -159,3 +159,37 @@ export function toLocalInput(iso: string): string {
 export function fromLocalInput(value: string): string {
   return new Date(value).toISOString();
 }
+
+/** Finestra emergent (p. ex. per editar un element). Es tanca amb Esc o amb el botó. */
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+        <header className="section-head">
+          <h2>{title}</h2>
+          <button type="button" onClick={onClose} aria-label="Tanca">
+            ✕
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Descarrega un text com a fitxer. */
+export function downloadFile(name: string, content: string, type = 'text/csv;charset=utf-8'): void {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

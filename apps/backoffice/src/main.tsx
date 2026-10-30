@@ -12,6 +12,7 @@ import { StaffTab } from './pages/event/StaffTab';
 import { MovementsTab } from './pages/event/MovementsTab';
 import { WristbandsTab } from './pages/event/WristbandsTab';
 import { CashTab } from './pages/event/CashTab';
+import { Badge, Wordmark } from './Logo';
 import './styles.css';
 
 function Shell() {
@@ -21,8 +22,10 @@ function Shell() {
   return (
     <>
       <header className="topbar">
-        <Link to="/" className="brand">
-          Cashless <span>Snail</span>
+        <Link to="/" className="brand" aria-label="Cashless Snail: inici">
+          <Badge size={34} />
+          <Wordmark size={20} />
+          <span className="brand-tag">backoffice</span>
         </Link>
         <div className="topbar-user">
           <span>{user.name}</span>

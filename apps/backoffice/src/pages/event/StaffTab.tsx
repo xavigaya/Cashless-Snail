@@ -11,7 +11,10 @@ import {
   type Terminal,
 } from '@cashless/shared';
 import { api } from '../../api';
-import { Badge, Empty, ErrorBox, Field, Form, formatDateTime, Section, useAction, useLoad } from '../../ui';
+import { CsvTools } from '../../csv-tools';
+import { Badge, Empty, ErrorBox, Field, Form, formatDateTime, Modal, Section, useAction, useLoad } from '../../ui';
+import { confirmDelete } from './CatalogTab';
+import { operatorsCsv, terminalsCsv } from './csvSpecs';
 import { useEventContext } from './EventLayout';
 
 export function StaffTab() {
@@ -24,94 +27,174 @@ export function StaffTab() {
   );
 }
 
+function OperatorForm({
+  initial,
+  submitLabel,
+  onSubmit,
+}: {
+  initial?: Operator;
+  submitLabel: string;
+  onSubmit: (body: { name: string; role: OperatorRole; pin?: string }) => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [pin, setPin] = useState('');
+  const [role, setRole] = useState<OperatorRole>(initial?.role ?? 'cashier');
+  const action = useAction();
+  return (
+    <Form
+      submitLabel={submitLabel}
+      busy={action.busy}
+      error={action.error}
+      onSubmit={async () => {
+        const ok = await action.run(() => onSubmit({ name, role, pin: pin || undefined }));
+        if (ok && !initial) {
+          setName('');
+          setPin('');
+        }
+      }}
+    >
+      <Field label="Nom">
+        <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
+      </Field>
+      <Field label="PIN" hint={initial ? 'Deixa-ho buit per no canviar-lo' : '4 a 6 xifres'}>
+        <input inputMode="numeric" pattern="\d{4,6}" value={pin} onChange={(e) => setPin(e.target.value)} required={!initial} autoComplete="off" />
+      </Field>
+      <Field label="Rol">
+        <select value={role} onChange={(e) => setRole(e.target.value as OperatorRole)}>
+          {OPERATOR_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {OPERATOR_ROLE_LABELS[r]}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </Form>
+  );
+}
+
 function OperatorsSection({ eventId }: { eventId: string }) {
   const operators = useLoad(() => api.get<Operator[]>(`/events/${eventId}/operators`), [eventId]);
-  const [name, setName] = useState('');
-  const [pin, setPin] = useState('');
-  const [role, setRole] = useState<OperatorRole>('cashier');
-  const action = useAction();
-  const edit = useAction();
-
-  const update = (op: Operator, body: object) =>
-    void edit.run(async () => {
-      await api.patch(`/events/${eventId}/operators/${op.id}`, body);
-      await operators.reload();
-    });
+  const [editing, setEditing] = useState<Operator | null>(null);
+  const act = useAction();
+  const reload = () => void operators.reload();
 
   return (
-    <Section title="Operadors">
+    <Section title="Operadors" actions={<CsvTools spec={operatorsCsv(eventId, operators.data ?? [])} onImported={reload} />}>
       <p className="muted" style={{ marginTop: -6 }}>
         Voluntaris que treballen als terminals. Entren triant el seu nom i escrivint el PIN.
       </p>
-      <ErrorBox message={operators.error ?? edit.error} />
+      <ErrorBox message={operators.error ?? act.error} />
       {operators.data?.length === 0 ? (
         <Empty>Cap operador encara.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Nom</th>
-              <th>Rol</th>
-              <th>Estat</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {operators.data?.map((op) => (
-              <tr key={op.id}>
-                <td>{op.name}</td>
-                <td>{OPERATOR_ROLE_LABELS[op.role]}</td>
-                <td>{op.active ? <Badge tone="good">Actiu</Badge> : <Badge>Inactiu</Badge>}</td>
-                <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                  <button
-                    className="link"
-                    onClick={() => {
-                      const newPin = window.prompt(`Nou PIN per a ${op.name} (4 a 6 xifres)`);
-                      if (newPin && /^\d{4,6}$/.test(newPin)) update(op, { pin: newPin });
-                      else if (newPin) edit.setError('El PIN ha de tenir entre 4 i 6 xifres');
-                    }}
-                  >
-                    Canvia el PIN
-                  </button>
-                  {' · '}
-                  <button className="link" onClick={() => update(op, { active: !op.active })}>
-                    {op.active ? 'Desactiva' : 'Activa'}
-                  </button>
-                </td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Rol</th>
+                <th>Estat</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {operators.data?.map((op) => (
+                <tr key={op.id}>
+                  <td>{op.name}</td>
+                  <td>{OPERATOR_ROLE_LABELS[op.role]}</td>
+                  <td>{op.active ? <Badge tone="good">Actiu</Badge> : <Badge>Inactiu</Badge>}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="link" onClick={() => setEditing(op)}>
+                        Edita
+                      </button>
+                      <button
+                        className="link"
+                        onClick={() =>
+                          void act.run(async () => {
+                            await api.patch(`/events/${eventId}/operators/${op.id}`, { active: !op.active });
+                            reload();
+                          })
+                        }
+                      >
+                        {op.active ? 'Desactiva' : 'Activa'}
+                      </button>
+                      <button className="link danger" onClick={() => confirmDelete(act, `l’operador «${op.name}»`, `/events/${eventId}/operators/${op.id}`, reload)}>
+                        Esborra
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-      <Form
+      <h3 className="subhead">Afegeix un operador</h3>
+      <OperatorForm
         submitLabel="Afegeix l’operador"
-        busy={action.busy}
-        error={action.error}
-        onSubmit={async () => {
-          if (await action.run(() => api.post(`/events/${eventId}/operators`, { name, pin, role }))) {
-            setName('');
-            setPin('');
-            await operators.reload();
-          }
+        onSubmit={async (body) => {
+          await api.post(`/events/${eventId}/operators`, body);
+          reload();
         }}
-      >
-        <Field label="Nom">
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </Field>
-        <Field label="PIN" hint="4 a 6 xifres">
-          <input inputMode="numeric" pattern="\d{4,6}" value={pin} onChange={(e) => setPin(e.target.value)} required />
-        </Field>
-        <Field label="Rol">
-          <select value={role} onChange={(e) => setRole(e.target.value as OperatorRole)}>
-            {OPERATOR_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {OPERATOR_ROLE_LABELS[r]}
+      />
+      {editing && (
+        <Modal title={`Edita ${editing.name}`} onClose={() => setEditing(null)}>
+          <OperatorForm
+            initial={editing}
+            submitLabel="Desa els canvis"
+            onSubmit={async (body) => {
+              await api.patch(`/events/${eventId}/operators/${editing.id}`, body);
+              setEditing(null);
+              reload();
+            }}
+          />
+        </Modal>
+      )}
+    </Section>
+  );
+}
+
+function TerminalForm({
+  initial,
+  pos,
+  submitLabel,
+  onSubmit,
+}: {
+  initial?: Terminal;
+  pos: PointOfSale[];
+  submitLabel: string;
+  onSubmit: (body: { name: string; pointOfSaleId: string }) => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [posId, setPosId] = useState(initial?.pointOfSaleId ?? '');
+  const action = useAction();
+  return (
+    <Form
+      submitLabel={submitLabel}
+      busy={action.busy}
+      error={action.error}
+      onSubmit={async () => {
+        const ok = await action.run(() => onSubmit({ name, pointOfSaleId: posId }));
+        if (ok && !initial) setName('');
+      }}
+    >
+      <Field label="Nom">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Barra 1" required minLength={2} />
+      </Field>
+      <Field label="Punt de venda" hint={initial ? 'El canvi s’aplica quan el terminal torna a connectar' : undefined}>
+        <select value={posId} onChange={(e) => setPosId(e.target.value)} required>
+          <option value="">Tria’n un…</option>
+          {pos
+            .filter((p) => p.active || p.id === initial?.pointOfSaleId)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({POS_KIND_LABELS[p.kind]})
               </option>
             ))}
-          </select>
-        </Field>
-      </Form>
-    </Section>
+        </select>
+      </Field>
+    </Form>
   );
 }
 
@@ -119,10 +202,9 @@ function TerminalsSection({ eventId }: { eventId: string }) {
   const terminals = useLoad(() => api.get<Terminal[]>(`/events/${eventId}/terminals`), [eventId]);
   const pos = useLoad(() => api.get<PointOfSale[]>(`/events/${eventId}/points-of-sale`), [eventId]);
   const meta = useLoad(() => api.get<{ publicApiUrl: string }>('/meta'), []);
-  const [name, setName] = useState('');
-  const [posId, setPosId] = useState('');
-  const action = useAction();
+  const [editing, setEditing] = useState<Terminal | null>(null);
   const edit = useAction();
+  const reload = () => void terminals.reload();
 
   const posLabel = (id: string) => {
     const p = pos.data?.find((x) => x.id === id);
@@ -136,7 +218,7 @@ function TerminalsSection({ eventId }: { eventId: string }) {
     });
 
   return (
-    <Section title="Terminals">
+    <Section title="Terminals" actions={<CsvTools spec={terminalsCsv(eventId, terminals.data ?? [], pos.data ?? [])} onImported={reload} />}>
       <p className="muted" style={{ marginTop: -6 }}>
         Per vincular un mòbil, obre l’app TPV i escaneja el QR (o escriu el codi). El codi caduca als 30 minuts.
       </p>
@@ -151,13 +233,17 @@ function TerminalsSection({ eventId }: { eventId: string }) {
                 {t.pairedAt ? `Vinculat a «${t.deviceName ?? 'dispositiu'}» · última connexió ${formatDateTime(t.lastSeenAt)}` : 'Encara no vinculat'}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               {t.active ? <Badge tone="good">Actiu</Badge> : <Badge tone="bad">Desactivat</Badge>}
               <button onClick={() => act(() => api.post(`/events/${eventId}/terminals/${t.id}/pairing-code`))}>
                 {t.pairedAt ? 'Vincula un altre dispositiu' : 'Nou codi'}
               </button>
+              <button onClick={() => setEditing(t)}>Edita</button>
               <button className={t.active ? 'danger' : ''} onClick={() => act(() => api.patch(`/events/${eventId}/terminals/${t.id}`, { active: !t.active }))}>
                 {t.active ? 'Desactiva' : 'Activa'}
+              </button>
+              <button className="danger" onClick={() => confirmDelete(edit, `el terminal «${t.name}»`, `/events/${eventId}/terminals/${t.id}`, reload)}>
+                Esborra
               </button>
             </div>
           </div>
@@ -177,33 +263,29 @@ function TerminalsSection({ eventId }: { eventId: string }) {
           )}
         </div>
       ))}
-      <Form
+      <h3 className="subhead">Crea un terminal</h3>
+      <TerminalForm
+        pos={pos.data ?? []}
         submitLabel="Crea el terminal"
-        busy={action.busy}
-        error={action.error}
-        onSubmit={async () => {
-          if (await action.run(() => api.post(`/events/${eventId}/terminals`, { name, pointOfSaleId: posId }))) {
-            setName('');
-            await terminals.reload();
-          }
+        onSubmit={async (body) => {
+          await api.post(`/events/${eventId}/terminals`, body);
+          reload();
         }}
-      >
-        <Field label="Nom">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Barra 1" required />
-        </Field>
-        <Field label="Punt de venda">
-          <select value={posId} onChange={(e) => setPosId(e.target.value)} required>
-            <option value="">Tria’n un…</option>
-            {pos.data
-              ?.filter((p) => p.active)
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({POS_KIND_LABELS[p.kind]})
-                </option>
-              ))}
-          </select>
-        </Field>
-      </Form>
+      />
+      {editing && (
+        <Modal title={`Edita ${editing.name}`} onClose={() => setEditing(null)}>
+          <TerminalForm
+            initial={editing}
+            pos={pos.data ?? []}
+            submitLabel="Desa els canvis"
+            onSubmit={async (body) => {
+              await api.patch(`/events/${eventId}/terminals/${editing.id}`, body);
+              setEditing(null);
+              reload();
+            }}
+          />
+        </Modal>
+      )}
     </Section>
   );
 }

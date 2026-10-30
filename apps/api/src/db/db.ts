@@ -36,6 +36,16 @@ export function createDb(sql: SqlClient): Db {
 }
 
 /** Codi d'error de PostgreSQL per a violació d'unicitat (també dins d'errors embolcallats per Drizzle). */
+/** L'error de PostgreSQL és perquè altres files depenen d'aquesta (clau forana)? */
+export function isForeignKeyViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 5; depth++) {
+    if ((current as { code?: string }).code === '23503') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   let current: unknown = error;
   for (let depth = 0; current && depth < 5; depth++) {

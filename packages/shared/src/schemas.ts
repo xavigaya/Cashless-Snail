@@ -95,6 +95,8 @@ export type CreatePointOfSaleInput = z.infer<typeof createPointOfSaleSchema>;
 
 export const updatePointOfSaleSchema = z.object({
   name: z.string().min(2).max(80).optional(),
+  /** Només per a barres i cuines. */
+  vendorId: uuid.optional(),
   active: z.boolean().optional(),
 });
 export type UpdatePointOfSaleInput = z.infer<typeof updatePointOfSaleSchema>;
@@ -238,6 +240,62 @@ export const closeShiftSchema = z.object({
   note: z.string().max(200).optional(),
 });
 export type CloseShiftInput = z.infer<typeof closeShiftSchema>;
+
+// ---------- Importació (CSV) ----------
+// Els elements es relacionen pel nom (p. ex. el venedor d'un producte). Si ja n'hi ha un amb el mateix nom,
+// s'actualitza; si no, es crea. Cada importació es fa sencera o no es fa (una sola transacció).
+
+const rowsOf = <T extends z.ZodTypeAny>(row: T, max = 500) => z.object({ rows: z.array(row).min(1).max(max) });
+const yesNo = z.boolean().optional();
+
+export const importVendorsSchema = rowsOf(z.object({ name: z.string().trim().min(2).max(120), commissionBps: commissionBps.default(0) }));
+export type ImportVendorsInput = z.infer<typeof importVendorsSchema>;
+
+export const importPointsOfSaleSchema = rowsOf(
+  z.object({ name: z.string().trim().min(2).max(80), kind: z.enum(POS_KINDS), vendorName: z.string().trim().max(120).optional(), active: yesNo }),
+);
+export type ImportPointsOfSaleInput = z.infer<typeof importPointsOfSaleSchema>;
+
+export const importProductsSchema = rowsOf(
+  z.object({
+    vendorName: z.string().trim().min(1).max(120),
+    name: z.string().trim().min(1).max(60),
+    priceCents: positiveCents,
+    vatRateBps: vatRateBps.default(1000),
+    category: z.string().trim().max(40).default('General'),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .default('#3B6FB6'),
+    sortOrder: z.number().int().default(0),
+    destination: z.enum(['bar', 'kitchen']).default('bar'),
+    active: yesNo,
+  }),
+  2000,
+);
+export type ImportProductsInput = z.infer<typeof importProductsSchema>;
+
+export const importOperatorsSchema = rowsOf(
+  z.object({ name: z.string().trim().min(2).max(60), role: z.enum(OPERATOR_ROLES), pin: pin.optional(), active: yesNo }),
+);
+export type ImportOperatorsInput = z.infer<typeof importOperatorsSchema>;
+
+export const importTerminalsSchema = rowsOf(
+  z.object({ name: z.string().trim().min(2).max(60), pointOfSaleName: z.string().trim().min(1).max(80), active: yesNo }),
+);
+export type ImportTerminalsInput = z.infer<typeof importTerminalsSchema>;
+
+/** Registre previ de polseres (p. ex. la llista d'UID que dona el proveïdor). */
+export const importWristbandsSchema = rowsOf(
+  z
+    .object({
+      uid: z.string().transform(normalizeUid).refine(isValidUid, 'UID NFC no vàlid').optional(),
+      code: z.string().transform(normalizeCode).refine(isValidCode, 'Codi de polsera no vàlid').optional(),
+    })
+    .refine((w) => w.uid !== undefined || w.code !== undefined, { message: 'Cal l’UID o el codi de la polsera' }),
+  5000,
+);
+export type ImportWristbandsInput = z.infer<typeof importWristbandsSchema>;
 
 export const voidSchema = z.object({
   id: uuid,

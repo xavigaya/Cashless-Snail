@@ -9,7 +9,7 @@ import {
   updateProductSchema,
   updateVendorSchema,
 } from '@cashless/shared';
-import { notFound, parseInput, parseUuid, unprocessable } from '../../common/errors';
+import { deleteOrConflict, notFound, parseInput, parseUuid, unprocessable } from '../../common/errors';
 import { organizations, pointsOfSale, products, vendors } from '../../db/schema';
 import { toPointOfSale, toProduct, toVendor } from '../../admin/mappers';
 import { authMiddleware } from '../auth-middleware';
@@ -70,6 +70,18 @@ export function catalogRoutes(deps: AppDeps) {
     return c.json(toVendor(row));
   });
 
+  app.delete('/events/:eventId/vendors/:vendorId', requireAdmin, async (c) => {
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    const vendorId = parseUuid(c.req.param('vendorId'), 'vendorId');
+    await access.event(c.get('admin'), eventId);
+    await deleteOrConflict('el venedor', async () => {
+      const rows = await db.delete(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.eventId, eventId))).returning({ id: vendors.id });
+      return rows.length;
+    });
+    await access.audit(db, c.get('admin'), { eventId, action: 'vendor.delete', targetType: 'vendor', targetId: vendorId });
+    return c.body(null, 204);
+  });
+
   // ---------- Punts de venda ----------
 
   app.get('/events/:eventId/points-of-sale', requireAdmin, async (c) => {
@@ -96,6 +108,11 @@ export function catalogRoutes(deps: AppDeps) {
     const posId = parseUuid(c.req.param('posId'), 'posId');
     const body = parseInput(updatePointOfSaleSchema, await readJson(c));
     await access.event(c.get('admin'), eventId);
+    if (body.vendorId) {
+      await assertVendorInEvent(eventId, body.vendorId);
+      const [current] = await db.select({ kind: pointsOfSale.kind }).from(pointsOfSale).where(eq(pointsOfSale.id, posId)).limit(1);
+      if (current?.kind === 'box_office') throw unprocessable('VALIDATION_ERROR', 'Una taquilla no té venedor');
+    }
     const [row] = await db
       .update(pointsOfSale)
       .set(body)
@@ -103,6 +120,21 @@ export function catalogRoutes(deps: AppDeps) {
       .returning();
     if (!row) throw notFound('Punt de venda');
     return c.json(toPointOfSale(row));
+  });
+
+  app.delete('/events/:eventId/points-of-sale/:posId', requireAdmin, async (c) => {
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    const posId = parseUuid(c.req.param('posId'), 'posId');
+    await access.event(c.get('admin'), eventId);
+    await deleteOrConflict('el punt de venda', async () => {
+      const rows = await db
+        .delete(pointsOfSale)
+        .where(and(eq(pointsOfSale.id, posId), eq(pointsOfSale.eventId, eventId)))
+        .returning({ id: pointsOfSale.id });
+      return rows.length;
+    });
+    await access.audit(db, c.get('admin'), { eventId, action: 'point_of_sale.delete', targetType: 'point_of_sale', targetId: posId });
+    return c.body(null, 204);
   });
 
   // ---------- Productes ----------
@@ -157,6 +189,18 @@ export function catalogRoutes(deps: AppDeps) {
       });
     }
     return c.json(toProduct(row!));
+  });
+
+  app.delete('/events/:eventId/products/:productId', requireAdmin, async (c) => {
+    const eventId = parseUuid(c.req.param('eventId'), 'eventId');
+    const productId = parseUuid(c.req.param('productId'), 'productId');
+    await access.event(c.get('admin'), eventId);
+    await deleteOrConflict('el producte', async () => {
+      const rows = await db.delete(products).where(and(eq(products.id, productId), eq(products.eventId, eventId))).returning({ id: products.id });
+      return rows.length;
+    });
+    await access.audit(db, c.get('admin'), { eventId, action: 'product.delete', targetType: 'product', targetId: productId });
+    return c.body(null, 204);
   });
 
   return app;

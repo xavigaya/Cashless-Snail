@@ -4,7 +4,7 @@ import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { parsePairingQr, type TerminalContext } from '@cashless/shared';
 import { TpvApi } from '../api';
-import { BigButton, ErrorText, Screen, styles as ui } from '../components';
+import { BigButton, Brand, ErrorText, Screen, styles as ui } from '../components';
 import { saveTerminal } from '../storage';
 import { colors, sizes } from '../theme';
 
@@ -38,6 +38,9 @@ export function PairScreen({ onPaired }: { onPaired: (api: TpvApi, context: Term
   return (
     <Screen>
       <View style={local.body}>
+        <View style={{ marginBottom: 18 }}>
+          <Brand size={44} />
+        </View>
         <Text style={ui.title}>Vincula aquest terminal</Text>
         <Text style={[ui.muted, { marginTop: 6 }]}>
           Al backoffice, ves a l’esdeveniment → Operadors i terminals, i escaneja el QR del terminal.
