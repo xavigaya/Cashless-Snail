@@ -16,7 +16,7 @@ El codi de l’API és el mateix que el de la versió local: es pot fer servir u
 
 Abans de fer-hi un esdeveniment real, tingues en compte:
 
-- **Pausa per inactivitat.** Supabase posa en pausa el projecte si passa una setmana sense activitat. El workflow «Manté Supabase actiu» fa una consulta cada 3 dies per evitar-ho. Si tot i així es posa en pausa, les dades no es perden: al panell de Supabase, obre el projecte i prem **Resume project**.
+- **Pausa per inactivitat.** Supabase posa en pausa el projecte si passa una setmana sense activitat. El workflow «Manté Supabase actiu» consulta la base de dades cada dia (amb diversos reintents) per evitar-ho, i es torna a activar a si mateix perquè GitHub no el desactivi si el repositori passa 60 dies sense canvis. Si falla, GitHub envia un correu al propietari. Si tot i així es posa en pausa, les dades no es perden: al panell de Supabase, obre el projecte i prem **Resume project**.
 - **Sense còpies de seguretat automàtiques.** Fes-ne una abans i després de cada esdeveniment (vegeu [Còpies de seguretat](#còpies-de-seguretat)).
 - **500 MB de base de dades i 2 projectes actius.** És molt més del que necessita aquest sistema.
 - **GitHub desactiva les tasques programades** d’un repositori que fa 60 dies que no té canvis, i avisa per correu. Si passa, torna-la a activar a la pestanya **Actions**.

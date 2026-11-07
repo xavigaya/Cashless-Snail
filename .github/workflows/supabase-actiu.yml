@@ -1,18 +1,49 @@
-# Manté actiu el projecte gratuït de Supabase.
+# Manté sempre actiu el projecte gratuït de Supabase.
+#
 # Supabase posa en pausa els projectes del pla gratuït després d'una setmana sense activitat.
-# Aquesta tasca fa una consulta a l'API cada 3 dies (que llegeix la base de dades).
+# Aquesta tasca consulta l'API cada dia (la consulta llegeix la base de dades), de manera que,
+# encara que falli algun dia, mai no passa una setmana sense activitat.
+#
+# A més, GitHub desactiva les tasques programades d'un repositori que fa 60 dies que no té canvis.
+# Per evitar-ho, cada execució torna a activar aquesta mateixa tasca (sense fer cap commit),
+# cosa que reinicia aquest comptador.
+#
+# Si una execució falla, GitHub envia un correu al propietari del repositori.
 # Per desactivar-la: Actions → "Manté Supabase actiu" → Disable workflow.
 name: Manté Supabase actiu
 
 on:
   schedule:
-    - cron: "17 7 */3 * *"
+    - cron: "17 7 * * *"
   workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   ping:
     if: vars.SUPABASE_PROJECT_REF != ''
     runs-on: ubuntu-latest
     steps:
-      - name: Consulta l'estat de l'API
-        run: curl --fail --silent --show-error --retry 3 --retry-delay 20 --retry-all-errors "https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/api/health"
+      - name: Consulta l'API (i, per tant, la base de dades)
+        run: |
+          url="https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/api/health"
+          # Fins a 6 intents en 10 minuts: la primera petició després d'una estona pot tardar a respondre.
+          for intent in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --max-time 60 "$url"; then
+              echo
+              echo "Supabase actiu (intent $intent)"
+              exit 0
+            fi
+            echo "::warning::L'intent $intent ha fallat; es torna a provar d'aquí a 2 minuts"
+            sleep 120
+          done
+          echo "::error::Supabase no respon. Comprova a supabase.com si el projecte està en pausa (i reactiva'l amb «Resume project»)."
+          exit 1
+
+      - name: Evita que GitHub desactivi aquesta tasca per inactivitat
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${{ github.repository }}/actions/workflows/supabase-actiu.yml/enable"
