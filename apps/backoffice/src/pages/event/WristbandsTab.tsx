@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatCode, isValidCode, normalizeCode, normalizeUid, type Balance, type Movement, type Page, type WristbandSummary } from '@cashless/shared';
-import { api, errorMessage } from '../../api';
+import { api, ApiRequestError, errorMessage } from '../../api';
+import { nfcReader, READER_LABELS, useNfcCard, useReaderState } from '../../nfc';
 import { CsvTools } from '../../csv-tools';
 import { Badge, Empty, ErrorBox, formatDateTime, Loading, Money, Section, useAction } from '../../ui';
 import { wristbandsCsv } from './csvSpecs';
@@ -26,6 +27,10 @@ export function WristbandsTab() {
   const detailRef = useRef<HTMLDivElement>(null);
   const search = useAction();
   const status = useAction();
+  const reader = useReaderState();
+  const [registerMode, setRegisterMode] = useState(false);
+  const [registered, setRegistered] = useState<{ uid: string; code: string; isNew: boolean; at: string }[]>([]);
+  const [unknownUid, setUnknownUid] = useState<string | null>(null);
 
   const load = useCallback(
     async (q: string, offset: string | null) => {
@@ -55,9 +60,48 @@ export function WristbandsTab() {
 
   const open = async (ref: { code?: string; uid?: string }) => {
     const params = ref.code ? `code=${ref.code}` : `uid=${encodeURIComponent(ref.uid ?? '')}`;
-    const ok = await search.run(async () => setSelected(await api.get<Lookup>(`/events/${event.id}/wristbands/lookup?${params}`)));
-    if (ok) setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    setUnknownUid(null);
+    search.setError(null);
+    try {
+      setSelected(await api.get<Lookup>(`/events/${event.id}/wristbands/lookup?${params}`));
+      setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    } catch (e) {
+      // Una polsera llegida amb el lector que encara no és al sistema: es pot registrar aquí mateix.
+      if (ref.uid && e instanceof ApiRequestError && e.error.code === 'WRISTBAND_NOT_FOUND') setUnknownUid(ref.uid);
+      else search.setError(errorMessage(e));
+    }
   };
+
+  /** Registra una polsera llegida (sense saldo) i en mostra el codi imprès assignat. */
+  const register = useCallback(
+    async (uid: string) => {
+      try {
+        const result = await api.post<{ created: number }>(`/events/${event.id}/import/wristbands`, { rows: [{ uid }] });
+        const found = await api.get<Lookup>(`/events/${event.id}/wristbands/lookup?uid=${uid}`);
+        setRegistered((list) => [
+          { uid, code: found.balance.code, isNew: result.created > 0, at: new Date().toISOString() },
+          ...list.filter((r) => r.uid !== uid),
+        ]);
+        setUnknownUid(null);
+      } catch (e) {
+        search.setError(errorMessage(e));
+      }
+    },
+    [event.id, search.setError],
+  );
+
+  // Cada polsera que s'apropa al lector USB: en mode registre, es registra; si no, se'n mostra el detall.
+  const onCard = useCallback(
+    (uid: string) => {
+      if (registerMode) void register(uid);
+      else {
+        setQuery('');
+        void open({ uid });
+      }
+    },
+    [registerMode, register],
+  );
+  useNfcCard(onCard);
 
   /** Cerca exacta (codi complet o UID), també entre polseres que encara no han fet res en aquest esdeveniment. */
   const lookupExact = () => {
@@ -113,6 +157,53 @@ export function WristbandsTab() {
         <p className="muted" style={{ fontSize: '0.85rem' }}>
           Surten les polseres que han fet algun moviment en aquest esdeveniment. Clica’n una per veure’n el saldo i els moviments.
         </p>
+        <div className="reader-panel">
+          <span className={`reader-dot reader-${reader.kind}`} aria-hidden="true" />
+          <span>{reader.kind === 'ready' ? `${READER_LABELS.ready}: apropa una polsera` : READER_LABELS[reader.kind]}</span>
+          {reader.kind === 'off' ? (
+            <button type="button" onClick={() => nfcReader.setEnabled(true)}>
+              Fes servir un lector USB
+            </button>
+          ) : (
+            <>
+              <label className="checkbox field" style={{ margin: 0 }}>
+                <input type="checkbox" checked={registerMode} onChange={(e) => setRegisterMode(e.target.checked)} />
+                <span>Mode registre (cada polsera que s’apropi es registra)</span>
+              </label>
+              <button type="button" className="link" onClick={() => nfcReader.setEnabled(false)}>
+                Desactiva
+              </button>
+            </>
+          )}
+        </div>
+        {reader.kind === 'no-bridge' && (
+          <p className="muted" style={{ fontSize: '0.85rem' }}>
+            Cal tenir obert a l’ordinador el programa «Lector NFC de Cashless Snail» (vegeu docs/lector-nfc.md). Si el navegador demana
+            permís per accedir a la xarxa local, accepta’l.
+          </p>
+        )}
+        {unknownUid && (
+          <div className="notice">
+            La polsera {unknownUid} no està registrada.{' '}
+            <button className="link" onClick={() => void register(unknownUid)}>
+              Registra-la
+            </button>
+          </div>
+        )}
+        {registered.length > 0 && (
+          <div className="ok">
+            <strong>Registrades ara: {registered.filter((r) => r.isNew).length} noves</strong>
+            {registered.length > registered.filter((r) => r.isNew).length && ` · ${registered.filter((r) => !r.isNew).length} ja hi eren`}
+            <ul style={{ margin: '6px 0 0', paddingLeft: 20, maxHeight: 160, overflowY: 'auto' }}>
+              {registered.map((r) => (
+                <li key={r.uid}>
+                  <span className="mono">{formatCode(r.code)}</span> · UID <span className="mono">{r.uid}</span>
+                  {r.isNew ? '' : ' (ja registrada)'}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <ErrorBox message={listError ?? search.error} />
 
         {items.length === 0 && !loading ? (

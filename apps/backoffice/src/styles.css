@@ -180,6 +180,12 @@ tr.selected td { background: var(--accent-soft); }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 @media (max-width: 640px) {
   .topbar { padding: 8px 12px; }
-  .brand-tag, .topbar-user > span { display: none; }
+  .brand-tag, .topbar-user > span:not(.topbar-reader) { display: none; }
   .section-head { flex-wrap: wrap; }
 }
+
+.reader-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; margin: 12px 0; }
+.reader-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.reader-ready { background: #2E9E62; box-shadow: 0 0 0 3px rgba(46, 158, 98, 0.25); }
+.reader-no-reader, .reader-no-bridge { background: var(--warn); }
+.topbar-reader { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; letter-spacing: 0.08em; color: #D5E3DA; }

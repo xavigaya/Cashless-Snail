@@ -90,3 +90,22 @@ jobs:
       - name: Registre de l'Edge Function
         if: failure()
         run: cat "$RUNNER_TEMP/edge/edge.log"
+
+  lector-nfc:
+    # Programa del lector NFC USB (apps/lector-nfc): proves i executable per a Windows.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/lector-nfc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/lector-nfc/go.mod
+          cache-dependency-path: apps/lector-nfc/go.sum
+      - run: go vet ./... && go test ./...
+      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o cashless-lector-nfc.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashless-lector-nfc-windows
+          path: apps/lector-nfc/cashless-lector-nfc.exe

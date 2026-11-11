@@ -13,7 +13,20 @@ import { MovementsTab } from './pages/event/MovementsTab';
 import { WristbandsTab } from './pages/event/WristbandsTab';
 import { CashTab } from './pages/event/CashTab';
 import { Badge, Wordmark } from './Logo';
+import { READER_LABELS, useReaderState } from './nfc';
 import './styles.css';
+
+/** Estat del lector NFC USB, només si s'ha activat. */
+function ReaderStatus() {
+  const reader = useReaderState();
+  if (reader.kind === 'off') return null;
+  return (
+    <span className="topbar-reader" title={reader.kind === 'ready' ? reader.reader : READER_LABELS[reader.kind]}>
+      <span className={`reader-dot reader-${reader.kind}`} aria-hidden="true" />
+      NFC
+    </span>
+  );
+}
 
 function Shell() {
   const { user, loading, logout } = useSession();
@@ -28,6 +41,7 @@ function Shell() {
           <span className="brand-tag">backoffice</span>
         </Link>
         <div className="topbar-user">
+          <ReaderStatus />
           <span>{user.name}</span>
           <button onClick={logout}>Surt</button>
         </div>

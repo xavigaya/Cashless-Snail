@@ -10,6 +10,7 @@ Projecte: plataforma cashless multi-entitat per a esdeveniments. L’usuari treb
 - `pnpm --filter @cashless/shared test` — proves de la lògica pura.
 - `pnpm db:migrate`, `pnpm db:seed`.
 - `pnpm --filter @cashless/api build:edge` — genera l’Edge Function de Supabase (`supabase/functions/api/api.js`, no es versiona).
+- `cd apps/lector-nfc && go test ./...` — programa pont del lector NFC USB (Go; a Windows no necessita cgo).
 - Per provar l’Edge Function: executa-la amb Deno i passa les proves amb `TEST_API_URL=http://127.0.0.1:8000/api` (vegeu `.github/workflows/ci.yml`).
 
 ## Arquitectura de l’API
